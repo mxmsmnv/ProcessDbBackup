@@ -1,18 +1,27 @@
 # ProcessDbBackup
 
-Database backup and restore module for ProcessWire 3.x. Supports local storage and Backblaze B2, manual and scheduled backups via LazyCron, with a native UIkit Admin UI.
+Database backup and restore module for ProcessWire 3.x.
+
+Supports local storage and Backblaze B2, three independent backup schedules (regular / weekly / monthly), chunked upload for large files, streaming restore, and a dashboard widget on the admin home page.
 
 ## Features
 
-- **One-click backup** from the Admin UI
-- **Multiple backups** with configurable retention count (auto-delete oldest)
-- **Restore** any backup directly from the UI
-- **Download** backups as `.sql.gz` files
-- **Backblaze B2** optional cloud upload (B2 API v3) with configurable local copy behaviour
-- **LazyCron** automatic scheduled backups — 22 intervals from every 30 seconds to every 4 weeks
-- **mysqldump** with PHP PDO fallback (gzip-compressed in both cases)
-- **Protected local storage** (`site/assets/backups/db/`) with `.htaccess` deny-all
-- **Meta-driven backup list** — backups appear in the UI even when stored on B2 only
+- **One-click backup** from the Admin UI with AJAX progress bar
+- **Three backup types** — regular, weekly, monthly — each with independent LazyCron schedule and retention count
+- **Admin home widget** — shows status, latest backup date and storage for each type, with "Create now" button per type
+- **Backblaze B2** optional cloud upload (API v3) for all backup types
+- **Configurable local copy** — keep or delete local file after B2 upload
+- **Chunked upload** — upload `.sql.gz` from your computer in 2MB chunks, bypasses `upload_max_filesize`
+- **Streaming restore** — PDO restore reads line-by-line, memory usage stays flat regardless of dump size
+- **Lock file** — prevents concurrent backup processes
+- **Verify integrity** — gzip check + SQL structure validation before any restore
+- **Partial restore** — select individual tables to restore from a backup
+- **Pre-restore auto-backup** — creates a safety backup of the current DB before any restore
+- **Exclude tables** — skip specific tables (e.g. cache, sessions) from all backups
+- **Inline labels** — add notes to any backup entry directly in the table
+- **Sort and filter** — sort by filename/date/size, filter by backup type
+- **Protected storage** — `site/assets/backups/db/` with `.htaccess` deny-all
+- **Meta-driven list** — B2-only backups appear in the UI even without a local file
 - Module log at `Setup → Logs → db-backup`
 
 ## Requirements
@@ -27,29 +36,82 @@ Database backup and restore module for ProcessWire 3.x. Supports local storage a
 
 1. Copy the `ProcessDbBackup/` folder to `site/modules/`
 2. In **Admin → Modules**, click **Refresh** and install **ProcessDbBackup**
-3. The module creates the admin page at **Admin → DB Backup** automatically
-4. Assign the `db-backup` permission to any roles that need access
+3. The admin page is created automatically at **Admin → DB Backup**
+4. Assign the `db-backup` permission to roles that need access
 
 ## Configuration
 
-Go to **Admin → Modules → Configure → ProcessDbBackup**:
+Go to **Admin → Modules → Configure → ProcessDbBackup**.
+
+### General
 
 | Setting | Description |
 |---|---|
-| Max backups (retention) | Oldest backups are deleted automatically when this count is exceeded. `0` = unlimited |
-| Auto-backup schedule | LazyCron interval. See full list below |
-| Enable Backblaze B2 upload | Upload every backup to B2 after creation |
-| Keep local copy when B2 is enabled | Checked: file kept locally **and** uploaded to B2. Unchecked: local file deleted after successful B2 upload |
-| Application Key ID | From your B2 bucket App Keys |
-| Application Key (secret) | Secret portion of the App Key |
-| Bucket ID | Found in your B2 bucket settings |
-| Path prefix in bucket | Optional subfolder, e.g. `mysite/db-backups` |
+| Max backups (retention) | Auto-delete oldest regular backups beyond this count. `0` = unlimited |
+| Auto-backup before restore | Creates a safety backup before any restore operation |
+| Exclude tables | One table name per line — skipped in all backups |
 
-### Available schedule intervals
+### Schedules
+
+Three independent fieldsets: **Regular**, **Weekly**, **Monthly**.
+
+| Setting | Description |
+|---|---|
+| Schedule | LazyCron interval for this backup type |
+| Keep (N backups) | Retention count for this type independently |
+
+**Regular** — for frequent backups (hourly, daily). Outdated status triggers after 2 days without a backup.
+
+**Weekly** — for weekly snapshots. Outdated status triggers after 7 days.
+
+**Monthly** — for long-term archival. Outdated status triggers after 28 days.
+
+### Available LazyCron intervals
 
 `every30Seconds` · `everyMinute` · `every2Minutes` · `every3Minutes` · `every4Minutes` · `every5Minutes` · `every10Minutes` · `every15Minutes` · `every30Minutes` · `every45Minutes` · `everyHour` · `every2Hours` · `every4Hours` · `every6Hours` · `every12Hours` · `everyDay` · `every2Days` · `every4Days` · `everyWeek` · `every2Weeks` · `every4Weeks`
 
-LazyCron fires on the next page load after the interval has elapsed, so actual timing depends on site traffic.
+LazyCron fires on the next page load after the interval has elapsed.
+
+### Backblaze B2
+
+| Setting | Description |
+|---|---|
+| Enable B2 upload | Upload every backup (all types) to B2 after creation |
+| Keep local copy | Checked: keep local file and upload to B2. Unchecked: delete local after successful B2 upload |
+| Application Key ID | From your B2 App Keys |
+| Application Key | Secret portion (shown once at creation) |
+| Bucket ID | Found on the B2 bucket overview page |
+| Path prefix | Optional subfolder, e.g. `mysite/db-backups` |
+
+The module uses **B2 API v3**. Required App Key capabilities: `readFiles`, `writeFiles`, `listFiles`, `deleteFiles`.
+
+## Admin home widget
+
+The widget appears at the top of **Admin → Dashboard** and shows a table with one row per backup type:
+
+| Column | Content |
+|---|---|
+| Type | Regular / Weekly / Monthly |
+| Status | 🟢 OK · 🟡 Outdated · 🔴 No backups |
+| Latest backup | Date and storage badge (Local / B2 only / Local+B2) |
+| Count | Number of backups of this type |
+| Schedule | Configured LazyCron interval |
+| Action | **Create now** button — creates a backup of that type immediately |
+
+Status thresholds: Regular → 2 days · Weekly → 7 days · Monthly → 28 days.
+
+Only visible to users with the `db-backup` permission.
+
+## Backup types and file naming
+
+| Type | Filename prefix | Default retention |
+|---|---|---|
+| Regular | `db-YYYY-MM-DD_HHiiss.sql.gz` | 10 |
+| Weekly | `db-weekly-YYYY-MM-DD_HHiiss.sql.gz` | 4 |
+| Monthly | `db-monthly-YYYY-MM-DD_HHiiss.sql.gz` | 3 |
+| Uploaded | `db-uploaded-YYYY-MM-DD_HHiiss.sql.gz` | — |
+
+Retention is enforced per type independently after each backup creation.
 
 ## Storage modes
 
@@ -59,57 +121,77 @@ LazyCron fires on the next page load after the interval has elapsed, so actual t
 | Local + B2 | ✅ | ✅ | Available |
 | B2 only | — | ✅ | Disabled (tooltip shown) |
 
-The backup list is driven by `.meta.json`, not the local filesystem. B2-only entries appear in the UI with a **B2 only** badge; download and restore buttons are greyed out since the file is not present locally.
+The backup list is driven by `.meta.json`. B2-only entries are visible in the UI with a **B2 only** badge.
 
-## Backup file location
+## File locations
 
 ```
-site/assets/backups/db/db-YYYY-MM-DD_HHiiss.sql.gz
-site/assets/backups/db/.meta.json
+site/assets/backups/db/              — backup directory (htaccess protected)
+site/assets/backups/db/.meta.json    — metadata for all backups
+site/assets/backups/db/.lock         — cron lock file (auto-removed)
+site/assets/backups/db/.chunks/      — temporary chunk storage during upload
 ```
-
-The directory is protected by `.htaccess` (deny all direct HTTP access). `.meta.json` tracks filename, date, size, method, and storage flags for each backup.
 
 ## Backup methods
 
-1. **mysqldump** (preferred) — invoked via shell; uses `--single-transaction --quick` for InnoDB-safe hot backups. Output is piped through `gzip`.
-2. **PHP PDO** (fallback) — used when `mysqldump` is not available. Exports all tables row-by-row in 100-row `INSERT` batches, written directly to a `.gz` file via `gzopen`.
-
-The method used is recorded in the log and in `.meta.json`.
+1. **mysqldump** (preferred) — `--single-transaction --quick` for InnoDB-safe hot backups, output piped through `gzip`
+2. **PHP PDO** (fallback) — exports tables row-by-row in 100-row INSERT batches, written directly to `.gz` via `gzopen`
 
 ## Restore
 
-Restore **overwrites the entire database**. The UI shows a confirmation dialog before proceeding. Two methods are tried in order:
+Restore **overwrites the database**. A confirmation dialog is shown before proceeding.
 
-1. **mysql CLI** — pipes the decompressed dump into `mysql`
-2. **PHP PDO** — reads the `.gz` file and executes statements one by one
+**Full restore** methods (tried in order):
+1. `mysql` CLI — pipes decompressed dump into `mysql`
+2. PHP PDO streaming — reads `.gz` line-by-line, executes statements one at a time
 
-Restore is only available for backups that have a local copy. B2-only backups must be downloaded manually to restore.
+**Partial restore** — select individual tables from the backup. Shows each table with a status badge (exists / new) and a "select all" checkbox.
 
-## Backblaze B2 setup
+Restore is only available for backups with a local copy. B2-only backups must be downloaded manually first.
 
-1. Create a private B2 bucket
-2. Go to **App Keys** and create a new key scoped to that bucket with capabilities: `readFiles`, `writeFiles`, `listFiles`, `deleteFiles`
-3. Copy the **Key ID** and **Application Key** into module settings (the secret is shown only once)
-4. Enter the **Bucket ID** (found on the bucket overview page)
-5. Optionally set a **Path prefix** to organise backups inside the bucket
+## Chunked upload
 
-The module uses B2 API v3 (`/b2api/v3/`).
+The upload form on the DB Backup page sends the file in **2MB chunks** via JavaScript `Fetch` API. Each chunk is saved to `.chunks/` on the server and assembled into the final file once all chunks arrive. This bypasses PHP's `upload_max_filesize` and `post_max_size` limits entirely — any file size works.
+
+After assembly, the file is validated (gzip magic bytes) and added to the backup list. The **Restore immediately** checkbox triggers a full restore right after upload.
+
+## Lock file
+
+When a backup starts, a `.lock` file is written with the current timestamp. If a subsequent process finds the lock file and it is less than 1 hour old, the backup is skipped. Locks older than 1 hour are considered stale and removed automatically. The lock is always removed on success or cron error.
 
 ## Changelog
 
+### 2.0.0 — 2026-03-28
+- Three independent backup types: regular, weekly, monthly
+- Per-type LazyCron schedule and retention
+- Admin home widget with per-type status and Create now buttons
+- Chunked upload (2MB chunks, no upload_max_filesize limit)
+- Streaming PDO restore (line-by-line, flat memory usage)
+- AJAX progress bar for Create Backup
+- Cron lock file to prevent concurrent backups
+- Inline label editing in backup table
+- Sort by filename / date / size
+- Filter table by backup type (tabs)
+- `create_typed` action for widget buttons
+- Weekly outdated threshold: 7 days
+- Monthly outdated threshold: 28 days
+
 ### 1.0.0 — 2026-03-28
 - Initial release
-- Manual and LazyCron scheduled backups (22 intervals)
+- Manual and LazyCron scheduled backups
 - Local storage with `.htaccess` protection
 - Backblaze B2 upload via API v3
-- Configurable "keep local copy" when B2 is enabled
-- B2-only storage mode — backups tracked in meta even without local file
+- Configurable keep local copy option
+- B2-only storage mode tracked in meta
 - Restore and delete from Admin UI
 - Download as `.sql.gz`
 - mysqldump with PHP PDO fallback
 - mysql CLI restore with PHP PDO fallback
-- Retention policy (auto-delete oldest)
-- Native UIkit Admin UI — no custom CSS
+- Verify backup integrity
+- Partial restore (select tables)
+- Pre-restore auto-backup
+- Exclude tables from backup
+- Retention policy per type
+- Native UIkit Admin UI
 - Module log (`db-backup`)
 - `db-backup` permission
