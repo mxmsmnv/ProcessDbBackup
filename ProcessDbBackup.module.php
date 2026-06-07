@@ -7,7 +7,7 @@
  * Supports local storage and Backblaze B2, manual and scheduled backups via LazyCron.
  *
  * @author Maxim Semenov <maxim@smnv.org>
- * @version 2.0.1
+ * @version 2.0.2
  * @license MIT
  */
 class ProcessDbBackup extends Process implements Module, ConfigurableModule {
@@ -16,7 +16,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		return [
 			'title'    => 'DB Backup',
 			'summary'  => 'Database backup and restore with local and Backblaze B2 storage, backup types (regular/weekly/monthly), chunked upload, streaming restore.',
-			'version'  => 201,
+			'version'  => 202,
 			'author'   => 'Maxim Semenov',
 			'icon'     => 'database',
 			'requires' => ['ProcessWire>=3.0.0', 'PHP>=8.0.0'],
@@ -626,7 +626,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 	// ── mysqldump ─────────────────────────────────────────────────────────────
 
 	protected function dumpViaMysqldump(string $filepath): array {
-		$binary = trim(shell_exec('which mysqldump 2>/dev/null') ?? '');
+		$binary = $this->findCliBinary('mysqldump');
 		if (!$binary) return ['success' => false, 'error' => 'mysqldump not found'];
 
 		$cfg  = $this->wire('config');
@@ -651,15 +651,23 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			}
 		}
 
-		$cmd = "{$binary} {$passCnf} -h {$host} {$port} -u {$user} "
-			 . "--single-transaction --quick --lock-tables=false "
-			 . "--add-drop-table --routines --triggers{$excludeArgs} {$name} | gzip > {$out} 2>&1";
+		$gzip = $this->findCliBinary('gzip');
+		if (!$gzip) {
+			if (isset($cnfFile) && file_exists($cnfFile)) unlink($cnfFile);
+			return ['success' => false, 'error' => 'gzip not found'];
+		}
 
-		exec($cmd, $output, $exitCode);
+		$cmd = escapeshellarg($binary) . " {$passCnf} -h {$host} {$port} -u {$user} "
+			 . "--single-transaction --quick --lock-tables=false "
+			 . "--add-drop-table --routines --triggers{$excludeArgs} {$name} | "
+			 . escapeshellarg($gzip) . " -c > {$out}";
+
+		$run = $this->runShellCommand($cmd);
 		if (isset($cnfFile) && file_exists($cnfFile)) unlink($cnfFile);
 
-		if ($exitCode !== 0 || !file_exists($filepath) || filesize($filepath) < 100) {
-			return ['success' => false, 'error' => 'mysqldump error: ' . implode(' ', $output)];
+		if ($run['exitCode'] !== 0 || !file_exists($filepath) || filesize($filepath) < 100) {
+			if (file_exists($filepath)) unlink($filepath);
+			return ['success' => false, 'error' => 'mysqldump error: ' . $run['output']];
 		}
 
 		return ['success' => true, 'method' => 'mysqldump'];
@@ -793,7 +801,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 
 	protected function restoreViaMysql(string $filepath): array {
 		set_time_limit(0); // Restore may take long on large databases
-		$binary = trim(shell_exec('which mysql 2>/dev/null') ?? '');
+		$binary = $this->findCliBinary('mysql');
 		if (!$binary) return ['success' => false, 'error' => 'mysql CLI not found'];
 
 		$cfg  = $this->wire('config');
@@ -810,14 +818,22 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		$src     = escapeshellarg($filepath);
 
 		// Use gunzip -c as it's more portable than zcat (available on macOS/Linux/BSD)
-		$gunzip = trim(shell_exec('which gunzip 2>/dev/null') ?? '');
-		$decomp = $gunzip ? "{$gunzip} -c {$src}" : "zcat {$src}";
-		$cmd = "{$decomp} | {$binary} {$passCnf} -h {$host} {$port} -u {$user} {$name} 2>&1";
-		exec($cmd, $output, $exitCode);
+		$gunzip = $this->findCliBinary('gunzip');
+		$gzip   = $this->findCliBinary('gzip');
+		if ($gunzip) {
+			$decomp = escapeshellarg($gunzip) . " -c {$src}";
+		} elseif ($gzip) {
+			$decomp = escapeshellarg($gzip) . " -dc {$src}";
+		} else {
+			if (isset($cnfFile) && file_exists($cnfFile)) unlink($cnfFile);
+			return ['success' => false, 'error' => 'gunzip/gzip not found'];
+		}
+		$cmd = "{$decomp} | " . escapeshellarg($binary) . " {$passCnf} -h {$host} {$port} -u {$user} {$name}";
+		$run = $this->runShellCommand($cmd);
 		if (isset($cnfFile) && file_exists($cnfFile)) unlink($cnfFile);
 
-		if ($exitCode !== 0) {
-			return ['success' => false, 'error' => 'mysql CLI error: ' . implode(' ', $output)];
+		if ($run['exitCode'] !== 0) {
+			return ['success' => false, 'error' => 'mysql CLI error: ' . $run['output']];
 		}
 
 		return ['success' => true, 'method' => 'mysql-cli'];
@@ -837,7 +853,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 
 			// Stream line-by-line — avoids loading entire dump into memory
 			$stmt    = '';
-				while (!gzeof($fh)) {
+			while (!gzeof($fh)) {
 				$line = gzgets($fh, 1048576); // 1MB max line (handles large INSERT chunks)
 				if ($line === false) break;
 
@@ -870,6 +886,23 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			try { if (isset($pdo)) $pdo->exec('SET FOREIGN_KEY_CHECKS=1'); } catch (\Throwable $ignored) {}
 			return ['success' => false, 'error' => 'PDO restore error: ' . $e->getMessage()];
 		}
+	}
+
+	protected function findCliBinary(string $name): string {
+		if (!preg_match('/^[a-zA-Z0-9._-]+$/', $name)) return '';
+		$binary = trim(shell_exec('command -v ' . escapeshellarg($name) . ' 2>/dev/null') ?? '');
+		return $binary !== '' && is_executable($binary) ? $binary : '';
+	}
+
+	protected function runShellCommand(string $cmd): array {
+		$wrapped = '/bin/bash -o pipefail -c ' . escapeshellarg($cmd) . ' 2>&1';
+		$output = [];
+		$exitCode = 0;
+		exec($wrapped, $output, $exitCode);
+		return [
+			'exitCode' => $exitCode,
+			'output'   => trim(implode("\n", $output)),
+		];
 	}
 
 	// ── Verify backup integrity ─────────────────────────────────────────────────
@@ -1033,6 +1066,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			return ['success' => true, 'restored_tables' => $restored, 'pre_backup' => $preBackup];
 
 		} catch (\Exception $e) {
+			try { if (isset($pdo)) $pdo->exec('SET FOREIGN_KEY_CHECKS=1'); } catch (\Throwable $ignored) {}
 			return ['success' => false, 'error' => 'PDO error: ' . $e->getMessage()];
 		}
 	}
@@ -1476,6 +1510,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 
 		if ($changed) {
 			file_put_contents($path, json_encode($json, JSON_PRETTY_PRINT), LOCK_EX);
+			$this->wire('modules')->saveConfig($this, 'meta_migrated', true);
 		} else {
 			// All entries already have required fields — mark migration complete
 			$this->wire('modules')->saveConfig($this, 'meta_migrated', true);

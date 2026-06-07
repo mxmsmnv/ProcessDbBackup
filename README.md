@@ -161,37 +161,4 @@ When a backup starts, a `.lock` file is written with the current timestamp. If a
 
 ## Changelog
 
-### 2.0.0 — 2026-03-28
-- Three independent backup types: regular, weekly, monthly
-- Per-type LazyCron schedule and retention
-- Admin home widget with per-type status and Create now buttons
-- Chunked upload (2MB chunks, no upload_max_filesize limit)
-- Streaming PDO restore (line-by-line, flat memory usage)
-- AJAX progress bar for Create Backup
-- Cron lock file to prevent concurrent backups
-- Inline label editing in backup table
-- Sort by filename / date / size
-- Filter table by backup type (tabs)
-- `create_typed` action for widget buttons
-- Weekly outdated threshold: 7 days
-- Monthly outdated threshold: 28 days
-
-### 1.0.0 — 2026-03-28
-- Initial release
-- Manual and LazyCron scheduled backups
-- Local storage with `.htaccess` protection
-- Backblaze B2 upload via API v3
-- Configurable keep local copy option
-- B2-only storage mode tracked in meta
-- Restore and delete from Admin UI
-- Download as `.sql.gz`
-- mysqldump with PHP PDO fallback
-- mysql CLI restore with PHP PDO fallback
-- Verify backup integrity
-- Partial restore (select tables)
-- Pre-restore auto-backup
-- Exclude tables from backup
-- Retention policy per type
-- Native UIkit Admin UI
-- Module log (`db-backup`)
-- `db-backup` permission
+See [CHANGELOG.md](CHANGELOG.md).
