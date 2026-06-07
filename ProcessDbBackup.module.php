@@ -7,7 +7,7 @@
  * Supports local storage and Backblaze B2, manual and scheduled backups via LazyCron.
  *
  * @author Maxim Semenov <maxim@smnv.org>
- * @version 2.0.2
+ * @version 2.1.1
  * @license MIT
  */
 class ProcessDbBackup extends Process implements Module, ConfigurableModule {
@@ -16,7 +16,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		return [
 			'title'    => 'DB Backup',
 			'summary'  => 'Database backup and restore with local and Backblaze B2 storage, backup types (regular/weekly/monthly), chunked upload, streaming restore.',
-			'version'  => 202,
+			'version'  => 211,
 			'author'   => 'Maxim Semenov',
 			'icon'     => 'database',
 			'requires' => ['ProcessWire>=3.0.0', 'PHP>=8.0.0'],
@@ -505,6 +505,59 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			$html .= "</tbody></table></div>";
 		}
 
+		// ── Database table sizes ───────────────────────────────────────────────
+		$tableSizes     = $this->getTableSizeList();
+		$excludedTables = array_flip($this->getExcludedTables());
+		$totalDbBytes   = array_sum(array_map(fn($t) => (int)($t['total_length'] ?? 0), $tableSizes));
+		$totalDbSize    = $this->formatBytes((int)$totalDbBytes);
+
+		$html .= '
+		<hr class="uk-margin-medium">
+		<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Database Table Sizes</h3>';
+
+		if (empty($tableSizes)) {
+			$html .= '<p class="uk-text-small uk-text-muted">Table size information is not available for this database user.</p>';
+		} else {
+			$html .= '
+			<div class="uk-flex uk-flex-between uk-flex-middle uk-margin-small-bottom">
+				<p class="uk-text-small uk-text-muted uk-margin-remove">All ' . count($tableSizes) . ' tables by storage size. Estimated total: <strong>' . $totalDbSize . '</strong>.</p>
+				<a href="' . $this->wire('config')->urls->admin . 'module/edit?name=' . $this->className() . '#Inputfield_exclude_tables" class="uk-button uk-button-default uk-button-small">
+					<span uk-icon="icon: settings; ratio:.7"></span>&nbsp; Exclude tables
+				</a>
+			</div>
+			<div class="uk-overflow-auto">
+			<table class="uk-table uk-table-small uk-table-divider uk-table-hover uk-table-striped">
+				<thead><tr>
+					<th>Table</th>
+					<th class="uk-text-right">Rows</th>
+					<th class="uk-text-right">Data</th>
+					<th class="uk-text-right">Index</th>
+					<th class="uk-text-right">Total</th>
+					<th class="uk-text-right">Backup</th>
+				</tr></thead>
+				<tbody>';
+
+			foreach ($tableSizes as $table) {
+				$name       = (string)($table['table_name'] ?? '');
+				$isExcluded = isset($excludedTables[$name]);
+				$rowClass   = $isExcluded ? ' class="uk-text-muted"' : '';
+				$status     = $isExcluded
+					? '<span class="uk-label">Excluded</span>'
+					: '<span class="uk-label uk-label-success">Included</span>';
+
+				$html .= '<tr' . $rowClass . '>'
+					. '<td class="uk-text-small"><code>' . htmlspecialchars($name) . '</code></td>'
+					. '<td class="uk-text-small uk-text-right uk-text-nowrap">' . number_format((int)($table['table_rows'] ?? 0)) . '</td>'
+					. '<td class="uk-text-small uk-text-right uk-text-nowrap">' . $this->formatBytes((int)($table['data_length'] ?? 0)) . '</td>'
+					. '<td class="uk-text-small uk-text-right uk-text-nowrap">' . $this->formatBytes((int)($table['index_length'] ?? 0)) . '</td>'
+					. '<td class="uk-text-small uk-text-right uk-text-nowrap"><strong>' . $this->formatBytes((int)($table['total_length'] ?? 0)) . '</strong></td>'
+					. '<td class="uk-text-right">' . $status . '</td>'
+					. '</tr>';
+			}
+
+			$html .= '</tbody></table></div>';
+		}
+
 		// ── Chunked upload form ────────────────────────────────────────────────
 		$html .= '
 		<hr class="uk-margin-medium">
@@ -529,10 +582,15 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				</button>
 			</div>
 		</div>
-		<div id="pdb-upload-progress" class="uk-hidden uk-margin-small-top">
-			<progress class="uk-progress" id="pdb-upload-bar" value="0" max="100" style="margin:0 0 4px"></progress>
-			<span id="pdb-upload-msg" class="uk-text-small uk-text-muted"></span>
-		</div>';
+			<div id="pdb-upload-progress" class="uk-hidden uk-margin-small-top">
+				<progress class="uk-progress" id="pdb-upload-bar" value="0" max="100" style="margin:0 0 4px"></progress>
+				<span id="pdb-upload-msg" class="uk-text-small uk-text-muted"></span>
+			</div>
+			<div class="uk-margin-large-top uk-text-right">
+				<a href="' . $this->wire('config')->urls->admin . 'module/edit?name=' . $this->className() . '" class="uk-button uk-button-default uk-button-small">
+					<span uk-icon="icon: settings; ratio:.7"></span>&nbsp; Module settings
+				</a>
+			</div>';
 
 		$html .= $this->renderScripts($pageUrl);
 
@@ -1457,6 +1515,39 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		$files = glob($dir . 'db-*' . self::BACKUP_EXT) ?: [];
 		$total = array_sum(array_map('filesize', $files));
 		return $this->formatBytes((int)$total);
+	}
+
+	protected function getExcludedTables(): array {
+		if (!$this->exclude_tables) return [];
+		$tables = array_filter(array_map('trim', explode("\n", $this->exclude_tables)));
+		return array_values(array_unique(array_filter(array_map(
+			fn($table) => preg_replace('/[^a-zA-Z0-9_]/', '', $table),
+			$tables
+		))));
+	}
+
+	protected function getTableSizeList(): array {
+		try {
+			$cfg = $this->wire('config');
+			$dsn = "mysql:host={$cfg->dbHost};dbname={$cfg->dbName};charset={$cfg->dbCharset}";
+			$pdo = new \PDO($dsn, $cfg->dbUser, $cfg->dbPass, [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
+			$stmt = $pdo->prepare("
+				SELECT
+					TABLE_NAME AS table_name,
+					COALESCE(TABLE_ROWS, 0) AS table_rows,
+					COALESCE(DATA_LENGTH, 0) AS data_length,
+					COALESCE(INDEX_LENGTH, 0) AS index_length,
+					COALESCE(DATA_LENGTH, 0) + COALESCE(INDEX_LENGTH, 0) AS total_length
+				FROM information_schema.TABLES
+				WHERE TABLE_SCHEMA = :schema
+				ORDER BY total_length DESC, TABLE_NAME ASC
+			");
+			$stmt->execute(['schema' => $cfg->dbName]);
+			return $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+		} catch (\Throwable $e) {
+			$this->log()->save(self::LOG_NAME, 'Could not read table sizes: ' . $e->getMessage());
+			return [];
+		}
 	}
 
 	protected function formatBytes(int $bytes): string {

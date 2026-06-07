@@ -18,6 +18,7 @@ Supports local storage and Backblaze B2, three independent backup schedules (reg
 - **Partial restore** — select individual tables to restore from a backup
 - **Pre-restore auto-backup** — creates a safety backup of the current DB before any restore
 - **Exclude tables** — skip specific tables (e.g. cache, sessions) from all backups
+- **Database table sizes** — dashboard section showing largest tables, row estimates, data/index size, and backup inclusion status
 - **Inline labels** — add notes to any backup entry directly in the table
 - **Sort and filter** — sort by filename/date/size, filter by backup type
 - **Protected storage** — `site/assets/backups/db/` with `.htaccess` deny-all

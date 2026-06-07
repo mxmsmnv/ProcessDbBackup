@@ -2,6 +2,16 @@
 
 All notable changes to ProcessDbBackup are documented in this file.
 
+## 2.1.1 — 2026-06-07
+
+- Added a bottom-of-page link from the DB Backup dashboard to the module settings
+
+## 2.1.0 — 2026-06-07
+
+- Added a dashboard section that lists database table sizes from `information_schema`
+- Shows estimated rows, data size, index size, total size, and whether each table is included in backups
+- Added a quick link from the table-size section to the module's excluded tables setting
+
 ## 2.0.2 — 2026-06-07
 
 - Fixed CLI backup/restore command handling to use `pipefail` and keep diagnostic output out of `.sql.gz` files
