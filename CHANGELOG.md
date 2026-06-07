@@ -2,6 +2,11 @@
 
 All notable changes to ProcessDbBackup are documented in this file.
 
+## 2.1.2 — 2026-06-07
+
+- Fixed a first-run deprecation warning when schedule settings have not been saved yet
+- Updated PDO MySQL buffered-query handling to prefer `Pdo\Mysql::ATTR_USE_BUFFERED_QUERY` on newer PHP versions
+
 ## 2.1.1 — 2026-06-07
 
 - Added a bottom-of-page link from the DB Backup dashboard to the module settings

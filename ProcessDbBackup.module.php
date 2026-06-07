@@ -7,7 +7,7 @@
  * Supports local storage and Backblaze B2, manual and scheduled backups via LazyCron.
  *
  * @author Maxim Semenov <maxim@smnv.org>
- * @version 2.1.1
+ * @version 2.1.2
  * @license MIT
  */
 class ProcessDbBackup extends Process implements Module, ConfigurableModule {
@@ -16,7 +16,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		return [
 			'title'    => 'DB Backup',
 			'summary'  => 'Database backup and restore with local and Backblaze B2 storage, backup types (regular/weekly/monthly), chunked upload, streaming restore.',
-			'version'  => 211,
+			'version'  => 212,
 			'author'   => 'Maxim Semenov',
 			'icon'     => 'database',
 			'requires' => ['ProcessWire>=3.0.0', 'PHP>=8.0.0'],
@@ -266,8 +266,10 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			'every2Weeks'    => 'Every 2w',
 			'every4Weeks'    => 'Every 4w',
 		];
-		$cronLabel  = $cronLabels[$this->cron_interval] ?? 'manual only';
-		$retention  = $this->retention_count > 0 ? (int)$this->retention_count : '&infin;';
+		$cronInterval = $this->cron_interval ?: 'never';
+		$retentionCount = (int)($this->retention_count ?: 0);
+		$cronLabel  = $cronLabels[$cronInterval] ?? 'manual only';
+		$retention  = $retentionCount > 0 ? $retentionCount : '&infin;';
 		$b2Tag      = $this->b2_enabled ? "<span class=\"uk-badge uk-margin-small-left\">B2</span>" : '';
 
 		// Type counts for tabs
@@ -739,6 +741,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			$dsn  = "mysql:host={$cfg->dbHost};dbname={$cfg->dbName};charset={$cfg->dbCharset}";
 			$pdo  = new \PDO($dsn, $cfg->dbUser, $cfg->dbPass, [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
 			$fh   = gzopen($filepath, 'wb9');
+			$bufferedQueryAttr = $this->getPdoMysqlUseBufferedQueryAttribute();
 
 			if (!$fh) return ['success' => false, 'error' => 'Cannot open output file.'];
 
@@ -762,12 +765,12 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				gzwrite($fh, $createRow[1] . ";\n\n");
 
 				// Data — unbuffered row-by-row to avoid loading entire table into memory
-				if (defined('PDO::MYSQL_ATTR_USE_BUFFERED_QUERY')) {
-					$pdo->setAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+				if ($bufferedQueryAttr !== null) {
+					$pdo->setAttribute($bufferedQueryAttr, false);
 				}
 				$stmt = $pdo->query("SELECT * FROM {$escapedTable}");
-				if (defined('PDO::MYSQL_ATTR_USE_BUFFERED_QUERY')) {
-					$pdo->setAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
+				if ($bufferedQueryAttr !== null) {
+					$pdo->setAttribute($bufferedQueryAttr, true);
 				}
 				$firstRow  = true;
 				$batchVals = [];
@@ -803,8 +806,8 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		} catch (\Exception $e) {
 			// Re-enable buffered queries if exception during unbuffered fetch
 			try {
-				if (defined('PDO::MYSQL_ATTR_USE_BUFFERED_QUERY') && isset($pdo)) {
-					$pdo->setAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
+				if (isset($bufferedQueryAttr) && $bufferedQueryAttr !== null && isset($pdo)) {
+					$pdo->setAttribute($bufferedQueryAttr, true);
 				}
 				if (isset($stmt)) $stmt->closeCursor();
 			} catch (\Throwable $ignored) {}
@@ -961,6 +964,17 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			'exitCode' => $exitCode,
 			'output'   => trim(implode("\n", $output)),
 		];
+	}
+
+	protected function getPdoMysqlUseBufferedQueryAttribute(): ?int {
+		if (defined('Pdo\\Mysql::ATTR_USE_BUFFERED_QUERY')) {
+			return constant('Pdo\\Mysql::ATTR_USE_BUFFERED_QUERY');
+		}
+		$legacyConstant = implode('::', ['PDO', 'MYSQL_ATTR_USE_BUFFERED_QUERY']);
+		if (defined($legacyConstant)) {
+			return constant($legacyConstant);
+		}
+		return null;
 	}
 
 	// ── Verify backup integrity ─────────────────────────────────────────────────
