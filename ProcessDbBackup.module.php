@@ -6,7 +6,7 @@
  * Database backup and restore module for ProcessWire.
  * Supports local storage and Backblaze B2, manual and scheduled backups via LazyCron.
  *
- * @author Maxim Semenov <maxim@smnv.org>
+ * @author Maxim Semenov <maxim@smnv.org> (smnv.org)
  * @version 2.1.2
  * @license MIT
  */
@@ -18,6 +18,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			'summary'  => 'Database backup and restore with local and Backblaze B2 storage, backup types (regular/weekly/monthly), chunked upload, streaming restore.',
 			'version'  => 212,
 			'author'   => 'Maxim Semenov',
+			'href'     => 'https://smnv.org',
 			'icon'     => 'database',
 			'requires' => ['ProcessWire>=3.0.0', 'PHP>=8.0.0'],
 			'installs' => [],

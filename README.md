@@ -4,6 +4,10 @@ Database backup and restore module for ProcessWire 3.x.
 
 Supports local storage and Backblaze B2, three independent backup schedules (regular / weekly / monthly), chunked upload for large files, streaming restore, and a dashboard widget on the admin home page.
 
+**Author:** Maxim Semenov  
+**Website:** [smnv.org](https://smnv.org)  
+**Email:** [maxim@smnv.org](mailto:maxim@smnv.org)
+
 If this project helps your work, consider supporting future development: [GitHub Sponsors](https://github.com/sponsors/mxmsmnv) or [smnv.org/sponsor](https://smnv.org/sponsor/).  
 
 ## Features
