@@ -2,6 +2,8 @@
 
 Database backup and restore module for ProcessWire 3.x.
 
+![ProcessDbBackup](assets/ProcessDbBackup.png)
+
 Supports local storage and Backblaze B2, three independent backup schedules (regular / weekly / monthly), chunked upload for large files, streaming restore, and a dashboard widget on the admin home page.
 
 **Author:** Maxim Semenov  
