@@ -126,6 +126,10 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			return $this->renderMigrationsDashboard();
 		}
 
+		if ($action === 'view_migration') {
+			return $this->renderMigrationPreview($this->input->get('file'));
+		}
+
 		return $this->renderDashboard();
 	}
 
@@ -742,10 +746,15 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			$preBackup = $m['pre_backup'] ? '<code>' . htmlspecialchars($m['pre_backup']) . '</code>' : '<span class="uk-text-muted">-</span>';
 
 			if ($m['applied']) {
-				$action = '<span class="uk-text-small uk-text-muted">Already applied</span>';
+				$action = '<a href="' . $pageUrl . '?action=view_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
+						<span uk-icon="icon: search; ratio:.7"></span>&nbsp; View
+					</a>
+					<span class="uk-text-small uk-text-muted uk-margin-small-left">Already applied</span>';
 			} else {
 				$confirm = "Apply migration {$m['filename']}?\nA pre-migration backup will be created if that setting is enabled.";
-				$action = '
+				$action = '<a href="' . $pageUrl . '?action=view_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
+						<span uk-icon="icon: search; ratio:.7"></span>&nbsp; View
+					</a>
 				<form method="post" action="' . $pageUrl . '" class="uk-display-inline">
 					' . $csrf . '
 					<input type="hidden" name="action" value="run_migration">
@@ -854,6 +863,70 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				</div>
 			</div>
 		</form>';
+	}
+
+	protected function renderMigrationPreview(string $filename): string {
+		$filename = basename($filename);
+		$backUrl = '<p><a href="' . $this->page->url . '?action=migrations" class="uk-button uk-button-default uk-button-small"><span uk-icon="icon: arrow-left; ratio:.7"></span>&nbsp; Back to migrations</a></p>';
+		if (!preg_match('/^[a-zA-Z0-9._-]+\.php$/', $filename)) {
+			return $this->renderSectionNav('migrations') . $backUrl . '<div class="uk-alert uk-alert-danger" uk-alert>Invalid migration filename.</div>';
+		}
+
+		$path = $this->getMigrationsDir() . $filename;
+		if (!is_file($path)) {
+			return $this->renderSectionNav('migrations') . $backUrl . '<div class="uk-alert uk-alert-danger" uk-alert>Migration file not found.</div>';
+		}
+
+		$statuses = $this->getMigrationStatusList();
+		$status = null;
+		foreach ($statuses as $candidate) {
+			if ($candidate['filename'] === $filename) {
+				$status = $candidate;
+				break;
+			}
+		}
+
+		$code = file_get_contents($path);
+		if ($code === false) {
+			return $this->renderSectionNav('migrations') . $backUrl . '<div class="uk-alert uk-alert-danger" uk-alert>Could not read migration file.</div>';
+		}
+
+		$csrf = $this->session->CSRF->renderInput();
+		$checksum = hash_file('sha256', $path) ?: '';
+		$isApplied = (bool)($status['applied'] ?? false);
+		$hasManualReview = str_contains($code, 'Manual review required');
+		$statusBadge = $isApplied
+			? '<span class="uk-label uk-label-success">Applied</span>'
+			: '<span class="uk-label uk-label-warning">Pending</span>';
+
+		$runForm = '';
+		if (!$isApplied) {
+			$confirm = "Apply migration {$filename}?\nA pre-migration backup will be created if that setting is enabled.";
+			$runForm = '
+			<form method="post" action="' . $this->page->url . '" class="uk-display-inline">
+				' . $csrf . '
+				<input type="hidden" name="action" value="run_migration">
+				<input type="hidden" name="migration_file" value="' . htmlspecialchars($filename) . '">
+				<button type="submit" class="uk-button uk-button-primary uk-button-small" onclick="return confirm(\'' . addslashes($confirm) . '\')">
+					<span uk-icon="icon: play; ratio:.7"></span>&nbsp; Run migration
+				</button>
+			</form>';
+		}
+
+		$manualAlert = $hasManualReview
+			? '<div class="uk-alert uk-alert-warning" uk-alert><p class="uk-margin-remove">This generated migration contains manual-review comments. Review changed/removed schema items before running it on production.</p></div>'
+			: '';
+
+		return $this->renderSectionNav('migrations') . $backUrl . '
+		<div class="uk-flex uk-flex-between uk-flex-middle uk-flex-wrap uk-margin-small-bottom" style="gap:8px">
+			<div>
+				<h3 class="uk-heading-divider uk-margin-remove-bottom">' . htmlspecialchars($filename) . '</h3>
+				<p class="uk-text-small uk-text-muted uk-margin-small-top">Checksum: <code>' . htmlspecialchars(substr($checksum, 0, 16)) . '</code> · ' . $statusBadge . '</p>
+			</div>
+			<div>' . $runForm . '</div>
+		</div>
+		' . $manualAlert . '
+		<pre class="uk-text-small" style="max-height:70vh;overflow:auto"><code>' . htmlspecialchars($code) . '</code></pre>';
 	}
 
 	protected function renderSchemaSnapshots(string $csrf): string {

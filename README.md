@@ -185,6 +185,8 @@ The GUI generator can create starter migrations for:
 
 Generated files are intentionally plain PHP so they can be reviewed, edited, committed, and reused during deployment.
 
+Migration files can be previewed from the GUI before running. The preview shows the file contents, checksum, current applied/pending state, and a warning when generated code contains manual-review comments.
+
 ### Schema snapshots
 
 The migrations screen can also create JSON schema snapshots in:
