@@ -1121,6 +1121,59 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				create_permission: ['pdb-access-name'],
 				create_role: ['pdb-access-name']
 			};
+			const title = document.getElementById('pdb-migration-title');
+			let titleTouched = title && title.value.trim() !== '';
+			const prettify = value => (value || '')
+				.replace(/[_-]+/g, ' ')
+				.replace(/\b\w/g, letter => letter.toUpperCase())
+				.trim();
+			const selectedValue = selector => {
+				const el = document.querySelector(selector);
+				return el ? el.value.trim() : '';
+			};
+			const selectedValues = selector => {
+				const el = document.querySelector(selector);
+				return el ? Array.from(el.selectedOptions).map(option => option.value.trim()).filter(Boolean) : [];
+			};
+			const suggestTitle = active => {
+				switch (active) {
+					case 'create_field': {
+						const field = selectedValue('#pdb-field-name-new');
+						return field ? 'Create ' + prettify(field) + ' field' : 'Create field';
+					}
+					case 'create_template': {
+						const template = selectedValue('#pdb-template-name-new');
+						const fields = selectedValues('#pdb-template-fields');
+						if (template && fields.length) return 'Create ' + prettify(template) + ' template with fields';
+						return template ? 'Create ' + prettify(template) + ' template' : 'Create template';
+					}
+					case 'add_field_to_template': {
+						const field = selectedValue('#pdb-field-name-existing');
+						const template = selectedValue('#pdb-template-name-existing');
+						if (field && template) return 'Add ' + prettify(field) + ' to ' + prettify(template);
+						return 'Add field to template';
+					}
+					case 'install_module': {
+						const module = selectedValue('#pdb-module-name');
+						return module ? 'Install ' + module : 'Install module';
+					}
+					case 'create_permission': {
+						const permission = selectedValue('#pdb-permission-name');
+						return permission ? 'Create ' + prettify(permission) + ' permission' : 'Create permission';
+					}
+					case 'create_role': {
+						const role = selectedValue('#pdb-permission-name');
+						return role ? 'Create ' + prettify(role) + ' role' : 'Create role';
+					}
+					default:
+						return '';
+				}
+			};
+			const updateTitle = active => {
+				if (!title || titleTouched) return;
+				const suggestion = suggestTitle(active);
+				if (suggestion) title.value = suggestion;
+			};
 			const update = () => {
 				const checked = document.querySelector('.pdb-migration-type:checked');
 				const active = checked ? checked.value : 'create_field';
@@ -1134,7 +1187,17 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 						el.querySelectorAll('input, select, textarea').forEach(input => input.disabled = false);
 					});
 				});
+				updateTitle(active);
 			};
+			if (title) {
+				title.addEventListener('input', () => {
+					titleTouched = title.value.trim() !== '';
+				});
+			}
+			document.querySelectorAll('.pdb-generator-field input, .pdb-generator-field select').forEach(input => {
+				input.addEventListener('input', update);
+				input.addEventListener('change', update);
+			});
 			types.forEach(type => type.addEventListener('change', update));
 			update();
 		})();
