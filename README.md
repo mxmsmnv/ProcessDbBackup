@@ -188,6 +188,8 @@ The GUI generator can create starter migrations for:
 
 Generated files are intentionally plain PHP so they can be reviewed, edited, committed, and reused during deployment.
 
+Existing migration `.php` files can also be uploaded from the GUI. Uploaded migrations must use a safe filename, must not overwrite an existing file, and must pass PHP syntax validation before being accepted.
+
 Migration files and schema snapshots can be downloaded from the GUI.
 Pending migration files and schema snapshots can also be deleted from the GUI. Applied migration files are protected from GUI deletion to preserve execution history.
 

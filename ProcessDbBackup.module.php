@@ -262,6 +262,16 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				$this->session->redirect($this->page->url . '?action=migrations');
 				return '';
 
+			case 'upload_migration_file':
+				$result = $this->uploadMigrationFile();
+				if ($result['success']) {
+					$this->message('Migration file uploaded: ' . $result['filename']);
+				} else {
+					$this->error('Migration file was not uploaded: ' . $result['error']);
+				}
+				$this->session->redirect($this->page->url . '?action=migrations');
+				return '';
+
 			case 'create_schema_snapshot':
 				$result = $this->createSchemaSnapshot();
 				if ($result['success']) {
@@ -752,6 +762,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		}
 
 		$html .= $this->renderMigrationGenerator($csrf);
+		$html .= $this->renderMigrationUpload($csrf);
 		$html .= $this->renderSchemaSnapshots($csrf);
 
 		if (empty($migrations)) {
@@ -945,6 +956,28 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			<button type="submit" class="uk-button uk-button-default uk-button-small" onclick="return confirm(\'' . addslashes($confirm) . '\')">
 				<span uk-icon="icon: trash; ratio:.7"></span>&nbsp; Delete
 			</button>
+		</form>';
+	}
+
+	protected function renderMigrationUpload(string $csrf): string {
+		return '
+		<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Upload Migration</h3>
+		<form method="post" action="' . $this->page->url . '" enctype="multipart/form-data" class="uk-form-stacked uk-margin-medium-bottom">
+			' . $csrf . '
+			<input type="hidden" name="action" value="upload_migration_file">
+			<div class="uk-grid-small uk-flex-middle" uk-grid>
+				<div class="uk-width-expand">
+					<div uk-form-custom="target: true">
+						<input type="file" name="migration_upload" accept=".php" required>
+						<input class="uk-input" type="text" placeholder="Select migration .php file..." readonly>
+					</div>
+				</div>
+				<div>
+					<button type="submit" class="uk-button uk-button-default">
+						<span uk-icon="icon: upload; ratio:.8"></span>&nbsp; Upload migration
+					</button>
+				</div>
+			</div>
 		</form>';
 	}
 
@@ -2377,6 +2410,54 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		return @unlink($path)
 			? ['success' => true]
 			: ['success' => false, 'error' => 'Could not delete schema snapshot.'];
+	}
+
+	protected function uploadMigrationFile(): array {
+		$upload = $_FILES['migration_upload'] ?? null;
+		if (!$upload || !is_array($upload)) {
+			return ['success' => false, 'error' => 'No upload received.'];
+		}
+		if (($upload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+			return ['success' => false, 'error' => 'Upload error code: ' . (int)$upload['error']];
+		}
+
+		$filename = basename((string)($upload['name'] ?? ''));
+		if (!preg_match('/^[a-zA-Z0-9._-]+\.php$/', $filename)) {
+			return ['success' => false, 'error' => 'Migration filename must be a safe .php filename.'];
+		}
+
+		$dir = $this->getMigrationsDir();
+		if (!is_dir($dir) && !wireMkdir($dir, true)) {
+			return ['success' => false, 'error' => 'Cannot create migrations directory.'];
+		}
+
+		$target = $dir . $filename;
+		if (file_exists($target)) {
+			return ['success' => false, 'error' => 'A migration with this filename already exists.'];
+		}
+
+		$tmp = (string)($upload['tmp_name'] ?? '');
+		$contents = is_file($tmp) ? file_get_contents($tmp) : false;
+		if ($contents === false || !str_starts_with(ltrim($contents), '<?php')) {
+			return ['success' => false, 'error' => 'Migration file must start with <?php.'];
+		}
+
+		$tempPath = $dir . '.upload-' . uniqid('', true) . '.php';
+		if (file_put_contents($tempPath, $contents, LOCK_EX) === false) {
+			return ['success' => false, 'error' => 'Could not write temporary migration file.'];
+		}
+		$lint = $this->lintMigrationFile($tempPath);
+		if (!$lint['valid']) {
+			@unlink($tempPath);
+			return ['success' => false, 'error' => 'PHP syntax check failed: ' . $lint['output']];
+		}
+
+		if (!@rename($tempPath, $target)) {
+			@unlink($tempPath);
+			return ['success' => false, 'error' => 'Could not save migration file.'];
+		}
+
+		return ['success' => true, 'filename' => $filename];
 	}
 
 	protected function createMigrationFileFromInput(): array {

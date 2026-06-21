@@ -16,6 +16,7 @@ All notable changes to ProcessDbBackup are documented in this file.
 - Added migration locking to prevent concurrent migration runs
 - Added GUI downloads for migration PHP files and schema snapshot JSON files
 - Added GUI deletion for pending migration files and schema snapshots
+- Added GUI upload for existing PHP migration files with filename and syntax validation
 - Added a `process_db_backup_migrations` execution log with filename, checksum, user, timestamp, pre-backup, and message
 - Added one-click pending migration execution with optional pre-migration backup
 - Added migration folder documentation and workflow notes
