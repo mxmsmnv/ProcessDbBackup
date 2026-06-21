@@ -730,7 +730,6 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 
 		$pageUrl    = $this->page->url;
 		$csrf       = $this->session->CSRF->renderInput();
-		$dir        = $this->getMigrationsDir();
 		$migrations = $this->getMigrationStatusList();
 		$pending    = array_values(array_filter($migrations, fn($m) => !$m['applied']));
 		$applied    = array_values(array_filter($migrations, fn($m) => $m['applied']));
@@ -768,7 +767,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			$html .= '
 			<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Migration Files</h3>
 			<p class="uk-text-muted"><span uk-icon="icon: info"></span> No migration files found.</p>
-			<p class="uk-text-small uk-text-muted">Create a PHP file in <code>' . htmlspecialchars($dir) . '</code>, for example <code>2026_06_21_1530_recipes.php</code>.</p>';
+			<p class="uk-text-small uk-text-muted">Create a PHP file in <code>' . htmlspecialchars($this->getRelativeAssetsPath(self::MIGRATIONS_DIR)) . '</code>, for example <code>2026_06_21_1530_recipes.php</code>.</p>';
 			return $html;
 		}
 
@@ -861,7 +860,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 	protected function renderMigrationGenerator(string $csrf): string {
 		return '
 		<ul uk-accordion class="uk-margin-medium-bottom">
-			<li>
+			<li class="uk-open">
 				<a class="uk-accordion-title uk-text-small uk-text-uppercase uk-text-muted" href="#">Create Migration</a>
 				<div class="uk-accordion-content">
 					<form method="post" action="' . $this->page->url . '" class="uk-form-stacked">
@@ -1149,7 +1148,6 @@ HTML;
 		$snapshots = $this->getSchemaSnapshotFiles();
 		$latest = $snapshots[0] ?? null;
 		$diff = $latest ? $this->diffSchemaSnapshot($latest['path']) : [];
-		$snapshotDir = $this->getSnapshotsDir();
 
 		$html = '
 		<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Schema Snapshots</h3>
@@ -1163,7 +1161,7 @@ HTML;
 				</button>
 			</form>
 		</div>
-		<p class="uk-text-small uk-text-muted">Folder: <code>' . htmlspecialchars($snapshotDir) . '</code></p>';
+		<p class="uk-text-small uk-text-muted">Folder: <code>' . htmlspecialchars($this->getRelativeAssetsPath(self::SNAPSHOTS_DIR)) . '</code></p>';
 
 		if (!$latest) {
 			return $html . '<p class="uk-text-muted"><span uk-icon="icon: info"></span> No schema snapshots yet.</p>';
