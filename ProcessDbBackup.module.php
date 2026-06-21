@@ -1351,14 +1351,17 @@ HTML;
 				' . $csrf . '
 				<input type="hidden" name="action" value="create_schema_snapshot">
 				<button type="submit" class="uk-button uk-button-default">
-					<span uk-icon="icon: camera; ratio:.7"></span>&nbsp; Create snapshot
+					<span uk-icon="icon: camera; ratio:.7"></span>&nbsp; Save current structure
 				</button>
 			</form>
 		</div>
 		<p class="uk-text-small uk-text-muted">Folder: <code>' . htmlspecialchars($this->getRelativeAssetsPath(self::SNAPSHOTS_DIR)) . '</code></p>';
 
 		if (!$latest) {
-			return $html . '<p class="uk-text-muted"><span uk-icon="icon: info"></span> No schema snapshots yet.</p>';
+			return $html . '
+			<div class="uk-alert uk-alert-primary" uk-alert>
+				<p class="uk-margin-remove"><strong>No schema baseline yet.</strong> Save the current structure before changing fields, templates, permissions, or roles. After your local changes, this section will show what changed and can generate a migration for newly added schema.</p>
+			</div>';
 		}
 
 		$html .= $this->renderSchemaBaselineForm($snapshots, $baseline['filename']);
