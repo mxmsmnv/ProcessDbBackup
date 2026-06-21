@@ -998,16 +998,18 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 					</div>
 				</div>
 				<div class="uk-width-1-1">
-					<details class="uk-margin-small-bottom">
-						<summary class="uk-text-small uk-text-muted">Advanced options</summary>
-						<div class="uk-margin-small-top">
+					<div class="uk-margin-small-bottom">
+						<button type="button" class="uk-button uk-button-default" id="pdb-advanced-toggle" aria-expanded="false" aria-controls="pdb-advanced-options">
+							<span uk-icon="icon: settings; ratio:.7"></span>&nbsp; Advanced options
+						</button>
+						<div id="pdb-advanced-options" class="uk-margin-small-top" hidden>
 							<label class="uk-form-label" for="pdb-migration-message">Return message</label>
 							<div class="uk-form-controls">
 								<input id="pdb-migration-message" class="uk-input" name="migration_message" type="text" placeholder="Recipe schema migrated.">
 								<p class="uk-text-meta uk-margin-small-top">Optional success message shown after the migration runs. Leave blank to use the migration name.</p>
 							</div>
 						</div>
-					</details>
+					</div>
 					<button type="submit" class="uk-button uk-button-primary">
 						<span uk-icon="icon: file-edit; ratio:.7"></span>&nbsp; Create migration file
 					</button>
@@ -1193,6 +1195,20 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			if (title) {
 				title.addEventListener('input', () => {
 					titleTouched = title.value.trim() !== '';
+				});
+			}
+			const advancedToggle = document.getElementById('pdb-advanced-toggle');
+			const advancedPanel = document.getElementById('pdb-advanced-options');
+			const syncAdvanced = expanded => {
+				if (!advancedToggle || !advancedPanel) return;
+				advancedPanel.hidden = !expanded;
+				advancedToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+				advancedPanel.querySelectorAll('input, select, textarea').forEach(input => input.disabled = !expanded);
+			};
+			if (advancedToggle && advancedPanel) {
+				syncAdvanced(false);
+				advancedToggle.addEventListener('click', () => {
+					syncAdvanced(advancedToggle.getAttribute('aria-expanded') !== 'true');
 				});
 			}
 			document.querySelectorAll('.pdb-generator-field input, .pdb-generator-field select').forEach(input => {
