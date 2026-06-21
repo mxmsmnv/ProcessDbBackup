@@ -706,6 +706,9 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		<div class="uk-alert uk-alert-primary" uk-alert>
 			<p class="uk-margin-remove">Migration files are PHP scripts stored in the module <code>migrations/</code> folder and can be committed to Git. They are meant for schema and deployment changes, not for overwriting live content.</p>
 		</div>';
+		if ($this->isProductionEnvironment()) {
+			$html .= '<div class="uk-alert uk-alert-warning" uk-alert><p class="uk-margin-remove"><strong>Production environment.</strong> Running a migration requires typing <code>RUN ON PRODUCTION</code>.</p></div>';
+		}
 
 		$html .= $this->renderMigrationGenerator($csrf);
 		$html .= $this->renderSchemaSnapshots($csrf);
@@ -761,6 +764,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 					<span class="uk-text-small uk-text-danger uk-margin-small-left">Fix syntax first</span>';
 			} else {
 				$confirm = "Apply migration {$m['filename']}?\nA pre-migration backup will be created if that setting is enabled.";
+				$productionConfirm = $this->renderProductionConfirmInput();
 				$action = '<a href="' . $pageUrl . '?action=view_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
 						<span uk-icon="icon: search; ratio:.7"></span>&nbsp; View
 					</a>
@@ -768,6 +772,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 					' . $csrf . '
 					<input type="hidden" name="action" value="run_migration">
 					<input type="hidden" name="migration_file" value="' . $file . '">
+					' . $productionConfirm . '
 					<button type="submit" class="uk-button uk-button-primary uk-button-small" onclick="return confirm(\'' . addslashes($confirm) . '\')">
 						<span uk-icon="icon: play; ratio:.7"></span>&nbsp; Run
 					</button>
@@ -917,11 +922,13 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		$runForm = '';
 		if (!$isApplied && $lint['valid']) {
 			$confirm = "Apply migration {$filename}?\nA pre-migration backup will be created if that setting is enabled.";
+			$productionConfirm = $this->renderProductionConfirmInput();
 			$runForm = '
 			<form method="post" action="' . $this->page->url . '" class="uk-display-inline">
 				' . $csrf . '
 				<input type="hidden" name="action" value="run_migration">
 				<input type="hidden" name="migration_file" value="' . htmlspecialchars($filename) . '">
+				' . $productionConfirm . '
 				<button type="submit" class="uk-button uk-button-primary uk-button-small" onclick="return confirm(\'' . addslashes($confirm) . '\')">
 					<span uk-icon="icon: play; ratio:.7"></span>&nbsp; Run migration
 				</button>
@@ -2310,6 +2317,24 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		return '<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Impact Preview</h3>' . $warningHtml . $table;
 	}
 
+	protected function isProductionEnvironment(): bool {
+		return ($this->deployment_environment ?: 'local') === 'production';
+	}
+
+	protected function renderProductionConfirmInput(): string {
+		if (!$this->isProductionEnvironment()) return '';
+		return '<input type="text" name="production_confirm" class="uk-input uk-form-small uk-form-width-medium uk-margin-small-right" placeholder="RUN ON PRODUCTION" autocomplete="off" required>';
+	}
+
+	protected function validateProductionConfirm(): array {
+		if (!$this->isProductionEnvironment()) return ['success' => true];
+		$value = trim((string)($this->input->post('production_confirm') ?? ''));
+		if ($value !== 'RUN ON PRODUCTION') {
+			return ['success' => false, 'error' => 'Production confirmation phrase is required. Type RUN ON PRODUCTION.'];
+		}
+		return ['success' => true];
+	}
+
 	protected function validateMigrationGeneratorData(array $data): array {
 		switch ($data['type']) {
 			case 'create_field':
@@ -2767,6 +2792,9 @@ PHP;
 		if (!$this->ensureMigrationStore()) {
 			return ['success' => false, 'error' => 'Migration store is not available. Check database permissions and module logs.'];
 		}
+
+		$productionConfirm = $this->validateProductionConfirm();
+		if (!$productionConfirm['success']) return $productionConfirm;
 
 		if (!preg_match('/^[a-zA-Z0-9._-]+\.php$/', $filename)) {
 			return ['success' => false, 'error' => 'Invalid migration filename.'];
@@ -3407,6 +3435,20 @@ HTML;
 	public static function getModuleConfigInputfields(array $data): InputfieldWrapper {
 		$modules  = wire('modules');
 		$wrapper  = new InputfieldWrapper();
+
+		// ── Environment ───────────────────────────────────────────────────────
+		$f = $modules->get('InputfieldSelect');
+		$f->attr('name', 'deployment_environment');
+		$f->label = 'Deployment environment';
+		$f->description = 'Used by migration safety checks. Production requires an explicit confirmation phrase before running migrations.';
+		$f->addOptions([
+			'local'      => 'Local',
+			'staging'    => 'Staging',
+			'production' => 'Production',
+		]);
+		$f->attr('value', $data['deployment_environment'] ?? 'local');
+		$f->columnWidth = 50;
+		$wrapper->add($f);
 
 		// ── Retention ──────────────────────────────────────────────────────────
 		$f = $modules->get('InputfieldInteger');

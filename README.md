@@ -58,6 +58,7 @@ Go to **Admin → Modules → Configure → ProcessDbBackup**.
 
 | Setting | Description |
 |---|---|
+| Deployment environment | Marks the site as local, staging, or production. Production requires typing `RUN ON PRODUCTION` before migrations can run |
 | Max backups (retention) | Auto-delete oldest regular backups beyond this count. `0` = unlimited |
 | Auto-backup before restore | Creates a safety backup before any restore operation |
 | Exclude tables | One table name per line — skipped in all backups |
@@ -186,6 +187,8 @@ The GUI generator can create starter migrations for:
 Generated files are intentionally plain PHP so they can be reviewed, edited, committed, and reused during deployment.
 
 Migration files can be previewed from the GUI before running. The preview shows the file contents, checksum, current applied/pending state, PHP syntax preflight status, detected schema references, potentially destructive operations, and a warning when generated code contains manual-review comments. Migrations with PHP syntax errors cannot be run until fixed.
+
+When the module is configured as **Production**, running a migration requires typing `RUN ON PRODUCTION` in the migration form.
 
 ### Schema snapshots
 
