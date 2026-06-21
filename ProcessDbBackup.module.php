@@ -7,7 +7,7 @@
  * Supports local storage and Backblaze B2, manual and scheduled backups via LazyCron.
  *
  * @author Maxim Semenov <maxim@smnv.org> (smnv.org)
- * @version 2.1.2
+ * @version 2.2.0
  * @license MIT
  */
 class ProcessDbBackup extends Process implements Module, ConfigurableModule {
@@ -16,7 +16,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		return [
 			'title'    => 'DB Backup',
 			'summary'  => 'Database backup and restore with local and Backblaze B2 storage, backup types (regular/weekly/monthly), chunked upload, streaming restore.',
-			'version'  => 212,
+			'version'  => 220,
 			'author'   => 'Maxim Semenov',
 			'href'     => 'https://smnv.org',
 			'icon'     => 'database',
@@ -43,6 +43,8 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 	const META_FILE      = 'backups/db/.meta.json';
 	const LOCK_FILE      = 'backups/db/.lock'; // base, type appended at runtime
 	const CHUNK_DIR      = 'backups/db/.chunks/';
+	const MIGRATIONS_DIR = 'migrations/';
+	const MIGRATION_TABLE = 'process_db_backup_migrations';
 	const LOG_NAME       = 'db-backup';
 	const B2_API_AUTH    = 'https://api.backblazeb2.com/b2api/v3/b2_authorize_account';
 
@@ -70,6 +72,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		// Migrate legacy meta entries — only in admin context, not on every frontend request
 		if ($this->wire('page') && $this->wire('page')->template == 'admin') {
 			$this->migrateMeta();
+			$this->ensureMigrationStore();
 		}
 	}
 
@@ -116,6 +119,10 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 
 		if ($action === 'partial') {
 			return $this->renderPartialRestore($this->input->get('file'));
+		}
+
+		if ($action === 'migrations') {
+			return $this->renderMigrationsDashboard();
 		}
 
 		return $this->renderDashboard();
@@ -207,6 +214,33 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 					$this->message('Label saved.');
 				}
 				break;
+
+			case 'run_migration':
+				$file = basename((string)($this->input->post('migration_file') ?? ''));
+				$result = $this->runMigration($file);
+				if ($result['success']) {
+					$this->message('Migration applied: ' . $file);
+					if (!empty($result['pre_backup'])) {
+						$this->message('Pre-migration backup saved: ' . $result['pre_backup']);
+					}
+					if (!empty($result['message'])) {
+						$this->message($result['message']);
+					}
+				} else {
+					$this->error('Migration failed: ' . $result['error']);
+				}
+				$this->session->redirect($this->page->url . '?action=migrations');
+				return '';
+
+			case 'create_migration':
+				$result = $this->createMigrationFileFromInput();
+				if ($result['success']) {
+					$this->message('Migration file created: ' . $result['filename']);
+				} else {
+					$this->error('Migration file was not created: ' . $result['error']);
+				}
+				$this->session->redirect($this->page->url . '?action=migrations');
+				return '';
 		}
 
 		$this->session->redirect($this->page->url);
@@ -278,7 +312,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		foreach ($allBackups as $b) $typeCounts[$b['type'] ?? 'regular'] = ($typeCounts[$b['type'] ?? 'regular'] ?? 0) + 1;
 
 		// ── Stats cards ───────────────────────────────────────────────────────
-		$html = "
+		$html = $this->renderSectionNav('backups') . "
 		<div class=\"uk-grid-small uk-child-width-auto uk-margin-medium-bottom\" uk-grid>
 			<div><div class=\"uk-card uk-card-default uk-card-small uk-card-body\">
 				<div class=\"uk-text-lead uk-text-bold\">{$count}</div>
@@ -598,6 +632,203 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		$html .= $this->renderScripts($pageUrl);
 
 		return $html;
+	}
+
+	// ── Migrations dashboard ─────────────────────────────────────────────────
+
+	protected function renderSectionNav(string $active): string {
+		$pageUrl = $this->page->url;
+		$backupsActive = $active === 'backups' ? ' class="uk-active"' : '';
+		$migrationsActive = $active === 'migrations' ? ' class="uk-active"' : '';
+
+		return "
+		<ul class=\"uk-tab uk-margin-medium-bottom\">
+			<li{$backupsActive}><a href=\"{$pageUrl}\"><span uk-icon=\"icon: database; ratio:.8\"></span>&nbsp; Backups</a></li>
+			<li{$migrationsActive}><a href=\"{$pageUrl}?action=migrations\"><span uk-icon=\"icon: git-branch; ratio:.8\"></span>&nbsp; Migrations</a></li>
+		</ul>";
+	}
+
+	protected function renderMigrationsDashboard(): string {
+		$this->ensureMigrationStore();
+
+		$pageUrl    = $this->page->url;
+		$csrf       = $this->session->CSRF->renderInput();
+		$dir        = $this->getMigrationsDir();
+		$migrations = $this->getMigrationStatusList();
+		$pending    = array_values(array_filter($migrations, fn($m) => !$m['applied']));
+		$applied    = array_values(array_filter($migrations, fn($m) => $m['applied']));
+
+		$html = $this->renderSectionNav('migrations');
+		$html .= '
+		<div class="uk-grid-small uk-child-width-auto uk-margin-medium-bottom" uk-grid>
+			<div><div class="uk-card uk-card-default uk-card-small uk-card-body">
+				<div class="uk-text-lead uk-text-bold">' . count($pending) . '</div>
+				<div class="uk-text-small uk-text-muted uk-text-uppercase">Pending</div>
+			</div></div>
+			<div><div class="uk-card uk-card-default uk-card-small uk-card-body">
+				<div class="uk-text-lead uk-text-bold">' . count($applied) . '</div>
+				<div class="uk-text-small uk-text-muted uk-text-uppercase">Applied</div>
+			</div></div>
+			<div><div class="uk-card uk-card-default uk-card-small uk-card-body">
+				<div class="uk-text-small uk-text-bold"><code>' . htmlspecialchars($dir) . '</code></div>
+				<div class="uk-text-small uk-text-muted uk-text-uppercase">Migration folder</div>
+			</div></div>
+		</div>
+
+		<div class="uk-alert uk-alert-primary" uk-alert>
+			<p class="uk-margin-remove">Migration files are PHP scripts stored in the module <code>migrations/</code> folder and can be committed to Git. They are meant for schema and deployment changes, not for overwriting live content.</p>
+		</div>';
+
+		$html .= $this->renderMigrationGenerator($csrf);
+
+		if (empty($migrations)) {
+			$html .= '
+			<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Migration Files</h3>
+			<p class="uk-text-muted"><span uk-icon="icon: info"></span> No migration files found.</p>
+			<p class="uk-text-small uk-text-muted">Create a PHP file in <code>' . htmlspecialchars($dir) . '</code>, for example <code>2026_06_21_1530_recipes.php</code>.</p>';
+			return $html;
+		}
+
+		$html .= '
+		<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Migration Files</h3>
+		<div class="uk-overflow-auto">
+		<table class="uk-table uk-table-small uk-table-divider uk-table-hover uk-table-striped">
+			<thead><tr>
+				<th>Migration</th>
+				<th>Status</th>
+				<th>Checksum</th>
+				<th>Applied at</th>
+				<th>Pre-backup</th>
+				<th class="uk-text-right">Action</th>
+			</tr></thead>
+			<tbody>';
+
+		foreach ($migrations as $m) {
+			$file = htmlspecialchars($m['filename']);
+			$checksumShort = htmlspecialchars(substr($m['checksum'], 0, 12));
+			if ($m['applied'] && $m['checksum_mismatch']) {
+				$status = '<span class="uk-label uk-label-danger">Applied, changed</span>';
+			} elseif ($m['applied']) {
+				$status = '<span class="uk-label uk-label-success">Applied</span>';
+			} else {
+				$status = '<span class="uk-label uk-label-warning">Pending</span>';
+			}
+			$appliedAt = $m['applied_at'] ? htmlspecialchars($m['applied_at']) : '<span class="uk-text-muted">-</span>';
+			$preBackup = $m['pre_backup'] ? '<code>' . htmlspecialchars($m['pre_backup']) . '</code>' : '<span class="uk-text-muted">-</span>';
+
+			if ($m['applied']) {
+				$action = '<span class="uk-text-small uk-text-muted">Already applied</span>';
+			} else {
+				$confirm = "Apply migration {$m['filename']}?\nA pre-migration backup will be created if that setting is enabled.";
+				$action = '
+				<form method="post" action="' . $pageUrl . '" class="uk-display-inline">
+					' . $csrf . '
+					<input type="hidden" name="action" value="run_migration">
+					<input type="hidden" name="migration_file" value="' . $file . '">
+					<button type="submit" class="uk-button uk-button-primary uk-button-small" onclick="return confirm(\'' . addslashes($confirm) . '\')">
+						<span uk-icon="icon: play; ratio:.7"></span>&nbsp; Run
+					</button>
+				</form>';
+			}
+
+			$html .= '<tr>'
+				. '<td class="uk-text-small uk-text-nowrap"><span uk-icon="icon: file-text; ratio:.8" class="uk-margin-small-right"></span><code>' . $file . '</code></td>'
+				. '<td>' . $status . '</td>'
+				. '<td class="uk-text-small"><code>' . $checksumShort . '</code></td>'
+				. '<td class="uk-text-small uk-text-muted uk-text-nowrap">' . $appliedAt . '</td>'
+				. '<td class="uk-text-small uk-text-nowrap">' . $preBackup . '</td>'
+				. '<td class="uk-text-right uk-text-nowrap">' . $action . '</td>'
+				. '</tr>';
+		}
+
+		$html .= '</tbody></table></div>';
+		return $html;
+	}
+
+	protected function renderMigrationGenerator(string $csrf): string {
+		return '
+		<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Create Migration</h3>
+		<form method="post" action="' . $this->page->url . '" class="uk-form-stacked uk-margin-medium-bottom">
+			' . $csrf . '
+			<input type="hidden" name="action" value="create_migration">
+			<div class="uk-grid-small" uk-grid>
+				<div class="uk-width-1-3@m">
+					<label class="uk-form-label" for="pdb-migration-title">Name</label>
+					<div class="uk-form-controls">
+						<input id="pdb-migration-title" class="uk-input" name="migration_title" type="text" placeholder="Add recipe fields" required>
+					</div>
+				</div>
+				<div class="uk-width-1-3@m">
+					<label class="uk-form-label" for="pdb-migration-type">Operation</label>
+					<div class="uk-form-controls">
+						<select id="pdb-migration-type" class="uk-select" name="migration_type">
+							<option value="create_field">Create field</option>
+							<option value="create_template">Create template</option>
+							<option value="add_field_to_template">Add field to template</option>
+							<option value="install_module">Install module</option>
+							<option value="create_permission">Create permission</option>
+							<option value="create_role">Create role</option>
+						</select>
+					</div>
+				</div>
+				<div class="uk-width-1-3@m">
+					<label class="uk-form-label" for="pdb-migration-message">Return message</label>
+					<div class="uk-form-controls">
+						<input id="pdb-migration-message" class="uk-input" name="migration_message" type="text" placeholder="Recipe schema migrated.">
+					</div>
+				</div>
+
+				<div class="uk-width-1-4@m">
+					<label class="uk-form-label" for="pdb-field-name">Field</label>
+					<div class="uk-form-controls">
+						<input id="pdb-field-name" class="uk-input" name="field_name" type="text" placeholder="recipe_time">
+					</div>
+				</div>
+				<div class="uk-width-1-4@m">
+					<label class="uk-form-label" for="pdb-field-type">Field type</label>
+					<div class="uk-form-controls">
+						<input id="pdb-field-type" class="uk-input" name="field_type" type="text" value="FieldtypeText">
+					</div>
+				</div>
+				<div class="uk-width-1-4@m">
+					<label class="uk-form-label" for="pdb-field-label">Field label</label>
+					<div class="uk-form-controls">
+						<input id="pdb-field-label" class="uk-input" name="field_label" type="text" placeholder="Recipe time">
+					</div>
+				</div>
+				<div class="uk-width-1-4@m">
+					<label class="uk-form-label" for="pdb-template-name">Template</label>
+					<div class="uk-form-controls">
+						<input id="pdb-template-name" class="uk-input" name="template_name" type="text" placeholder="recipe">
+					</div>
+				</div>
+
+				<div class="uk-width-1-2@m">
+					<label class="uk-form-label" for="pdb-template-fields">Template fields</label>
+					<div class="uk-form-controls">
+						<input id="pdb-template-fields" class="uk-input" name="template_fields" type="text" placeholder="title, recipe_time, body">
+					</div>
+				</div>
+				<div class="uk-width-1-4@m">
+					<label class="uk-form-label" for="pdb-module-name">Module</label>
+					<div class="uk-form-controls">
+						<input id="pdb-module-name" class="uk-input" name="module_name" type="text" placeholder="FieldtypeRepeater">
+					</div>
+				</div>
+				<div class="uk-width-1-4@m">
+					<label class="uk-form-label" for="pdb-permission-name">Permission / role</label>
+					<div class="uk-form-controls">
+						<input id="pdb-permission-name" class="uk-input" name="access_name" type="text" placeholder="recipe-editor">
+					</div>
+				</div>
+
+				<div class="uk-width-1-1">
+					<button type="submit" class="uk-button uk-button-default">
+						<span uk-icon="icon: file-edit; ratio:.8"></span>&nbsp; Create migration file
+					</button>
+				</div>
+			</div>
+		</form>';
 	}
 	// ── Create backup ─────────────────────────────────────────────────────────
 
@@ -1652,6 +1883,434 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		file_put_contents($path, json_encode($meta, JSON_PRETTY_PRINT), LOCK_EX);
 	}
 
+	// ── Migration store ──────────────────────────────────────────────────────
+
+	protected function ensureMigrationStore(): bool {
+		try {
+			$sql = "CREATE TABLE IF NOT EXISTS `" . self::MIGRATION_TABLE . "` (
+				`id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+				`filename` VARCHAR(190) NOT NULL,
+				`checksum` CHAR(64) NOT NULL,
+				`applied_at` DATETIME NOT NULL,
+				`applied_by` VARCHAR(190) NOT NULL DEFAULT '',
+				`pre_backup` VARCHAR(190) NOT NULL DEFAULT '',
+				`message` TEXT NULL,
+				PRIMARY KEY (`id`),
+				UNIQUE KEY `filename` (`filename`)
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+			$this->wire('database')->exec($sql);
+			return true;
+		} catch (\Throwable $e) {
+			$this->log()->save(self::LOG_NAME, 'Could not ensure migration store: ' . $e->getMessage());
+			return false;
+		}
+	}
+
+	protected function getMigrationsDir(): string {
+		return __DIR__ . '/' . self::MIGRATIONS_DIR;
+	}
+
+	protected function getMigrationFiles(): array {
+		$dir = $this->getMigrationsDir();
+		if (!is_dir($dir)) {
+			@wireMkdir($dir, true);
+		}
+		if (!is_dir($dir)) return [];
+
+		$files = glob($dir . '*.php') ?: [];
+		$files = array_values(array_filter($files, function($path) {
+			return is_file($path) && preg_match('/^[a-zA-Z0-9._-]+\.php$/', basename($path));
+		}));
+		sort($files, SORT_NATURAL);
+		return $files;
+	}
+
+	protected function getAppliedMigrations(): array {
+		if (!$this->ensureMigrationStore()) return [];
+
+		try {
+			$stmt = $this->wire('database')->query("SELECT * FROM `" . self::MIGRATION_TABLE . "` ORDER BY filename ASC");
+			$rows = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+			$indexed = [];
+			foreach ($rows as $row) {
+				$indexed[$row['filename']] = $row;
+			}
+			return $indexed;
+		} catch (\Throwable $e) {
+			$this->log()->save(self::LOG_NAME, 'Could not read migration store: ' . $e->getMessage());
+			return [];
+		}
+	}
+
+	protected function getMigrationStatusList(): array {
+		$applied = $this->getAppliedMigrations();
+		$list = [];
+
+		foreach ($this->getMigrationFiles() as $path) {
+			$filename = basename($path);
+			$checksum = hash_file('sha256', $path) ?: '';
+			$row = $applied[$filename] ?? null;
+			$list[] = [
+				'filename'          => $filename,
+				'path'              => $path,
+				'checksum'          => $checksum,
+				'applied'           => (bool)$row,
+				'checksum_mismatch' => $row && !hash_equals((string)$row['checksum'], $checksum),
+				'applied_at'        => $row['applied_at'] ?? '',
+				'applied_by'        => $row['applied_by'] ?? '',
+				'pre_backup'        => $row['pre_backup'] ?? '',
+				'message'           => $row['message'] ?? '',
+			];
+		}
+
+		return $list;
+	}
+
+	protected function createMigrationFileFromInput(): array {
+		$type = (string)($this->input->post('migration_type') ?? '');
+		$allowed = ['create_field', 'create_template', 'add_field_to_template', 'install_module', 'create_permission', 'create_role'];
+		if (!in_array($type, $allowed, true)) {
+			return ['success' => false, 'error' => 'Invalid migration operation.'];
+		}
+
+		$title = $this->sanitizer->text((string)($this->input->post('migration_title') ?? ''));
+		$message = $this->sanitizer->text((string)($this->input->post('migration_message') ?? ''));
+		if ($title === '') {
+			return ['success' => false, 'error' => 'Migration name is required.'];
+		}
+
+		$data = [
+			'type'            => $type,
+			'title'           => $title,
+			'message'         => $message,
+			'field_name'      => $this->sanitizePwName((string)($this->input->post('field_name') ?? '')),
+			'field_type'      => $this->sanitizeClassName((string)($this->input->post('field_type') ?? 'FieldtypeText')),
+			'field_label'     => $this->sanitizer->text((string)($this->input->post('field_label') ?? '')),
+			'template_name'   => $this->sanitizePwName((string)($this->input->post('template_name') ?? '')),
+			'template_fields' => $this->sanitizeNameList((string)($this->input->post('template_fields') ?? '')),
+			'module_name'     => $this->sanitizeClassName((string)($this->input->post('module_name') ?? '')),
+			'access_name'     => $this->sanitizeAccessName((string)($this->input->post('access_name') ?? '')),
+		];
+
+		$validation = $this->validateMigrationGeneratorData($data);
+		if (!$validation['success']) return $validation;
+
+		$dir = $this->getMigrationsDir();
+		if (!is_dir($dir) && !wireMkdir($dir, true)) {
+			return ['success' => false, 'error' => 'Cannot create migrations directory.'];
+		}
+
+		$slug = $this->sanitizeMigrationSlug($title);
+		$filename = date('Y_m_d_His') . '_' . $slug . '.php';
+		$path = $dir . $filename;
+		$counter = 2;
+		while (file_exists($path)) {
+			$filename = date('Y_m_d_His') . '_' . $slug . '_' . $counter . '.php';
+			$path = $dir . $filename;
+			$counter++;
+		}
+
+		$code = $this->buildMigrationCode($data);
+		if (file_put_contents($path, $code, LOCK_EX) === false) {
+			return ['success' => false, 'error' => 'Could not write migration file.'];
+		}
+
+		return ['success' => true, 'filename' => $filename];
+	}
+
+	protected function validateMigrationGeneratorData(array $data): array {
+		switch ($data['type']) {
+			case 'create_field':
+				if ($data['field_name'] === '') return ['success' => false, 'error' => 'Field name is required.'];
+				if ($data['field_type'] === '') return ['success' => false, 'error' => 'Field type is required.'];
+				break;
+			case 'create_template':
+				if ($data['template_name'] === '') return ['success' => false, 'error' => 'Template name is required.'];
+				break;
+			case 'add_field_to_template':
+				if ($data['field_name'] === '') return ['success' => false, 'error' => 'Field name is required.'];
+				if ($data['template_name'] === '') return ['success' => false, 'error' => 'Template name is required.'];
+				break;
+			case 'install_module':
+				if ($data['module_name'] === '') return ['success' => false, 'error' => 'Module name is required.'];
+				break;
+			case 'create_permission':
+			case 'create_role':
+				if ($data['access_name'] === '') return ['success' => false, 'error' => 'Permission / role name is required.'];
+				break;
+		}
+
+		return ['success' => true];
+	}
+
+	protected function sanitizePwName(string $value): string {
+		$value = strtolower(trim($value));
+		$value = preg_replace('/[^a-z0-9_]/', '_', $value);
+		$value = preg_replace('/_+/', '_', $value);
+		return trim((string)$value, '_');
+	}
+
+	protected function sanitizeAccessName(string $value): string {
+		$value = strtolower(trim($value));
+		$value = preg_replace('/[^a-z0-9_-]/', '-', $value);
+		$value = preg_replace('/-+/', '-', $value);
+		return trim((string)$value, '-');
+	}
+
+	protected function sanitizeClassName(string $value): string {
+		return preg_replace('/[^a-zA-Z0-9_]/', '', trim($value)) ?: '';
+	}
+
+	protected function sanitizeNameList(string $value): array {
+		$parts = preg_split('/[\s,]+/', $value) ?: [];
+		$names = [];
+		foreach ($parts as $part) {
+			$name = $this->sanitizePwName($part);
+			if ($name !== '') $names[] = $name;
+		}
+		return array_values(array_unique($names));
+	}
+
+	protected function sanitizeMigrationSlug(string $value): string {
+		$value = strtolower(trim($value));
+		$value = preg_replace('/[^a-z0-9]+/', '_', $value);
+		$value = trim((string)$value, '_');
+		return $value !== '' ? substr($value, 0, 80) : 'migration';
+	}
+
+	protected function buildMigrationCode(array $data): string {
+		$body = match($data['type']) {
+			'create_field'          => $this->buildCreateFieldMigrationCode($data),
+			'create_template'       => $this->buildCreateTemplateMigrationCode($data),
+			'add_field_to_template' => $this->buildAddFieldToTemplateMigrationCode($data),
+			'install_module'        => $this->buildInstallModuleMigrationCode($data),
+			'create_permission'     => $this->buildCreatePermissionMigrationCode($data),
+			'create_role'           => $this->buildCreateRoleMigrationCode($data),
+			default                 => '',
+		};
+
+		$title = var_export($data['title'], true);
+		$message = var_export($data['message'] ?: $data['title'] . ' migrated.', true);
+
+		return <<<PHP
+<?php namespace ProcessWire;
+
+/**
+ * {$data['title']}
+ *
+ * Generated by ProcessDbBackup migrations.
+ */
+
+\$messages = [];
+\$messages[] = {$title};
+
+{$body}
+
+return {$message};
+PHP;
+	}
+
+	protected function buildCreateFieldMigrationCode(array $data): string {
+		$fieldName = var_export($data['field_name'], true);
+		$fieldType = var_export($data['field_type'], true);
+		$fieldLabel = var_export($data['field_label'] ?: $data['field_name'], true);
+
+		return <<<PHP
+\$field = \$fields->get({$fieldName});
+if (!\$field->id) {
+	\$field = new Field();
+	\$field->name = {$fieldName};
+	\$field->type = \$modules->get({$fieldType});
+	\$field->label = {$fieldLabel};
+	\$fields->save(\$field);
+} else {
+	\$changed = false;
+	if ((string)\$field->label !== {$fieldLabel}) {
+		\$field->label = {$fieldLabel};
+		\$changed = true;
+	}
+	if (\$changed) \$fields->save(\$field);
+}
+PHP;
+	}
+
+	protected function buildCreateTemplateMigrationCode(array $data): string {
+		$templateName = var_export($data['template_name'], true);
+		$fieldsArray = var_export($data['template_fields'] ?: ['title'], true);
+
+		return <<<PHP
+\$template = \$templates->get({$templateName});
+if (!\$template->id) {
+	\$fieldgroup = \$fieldgroups->get({$templateName});
+	if (!\$fieldgroup->id) {
+		\$fieldgroup = new Fieldgroup();
+		\$fieldgroup->name = {$templateName};
+		\$fieldgroups->save(\$fieldgroup);
+	}
+
+	\$template = new Template();
+	\$template->name = {$templateName};
+	\$template->fieldgroup = \$fieldgroup;
+	\$templates->save(\$template);
+}
+
+foreach ({$fieldsArray} as \$fieldName) {
+	\$field = \$fields->get(\$fieldName);
+	if (\$field->id && !\$template->fieldgroup->hasField(\$field)) {
+		\$template->fieldgroup->add(\$field);
+	}
+}
+\$fieldgroups->save(\$template->fieldgroup);
+PHP;
+	}
+
+	protected function buildAddFieldToTemplateMigrationCode(array $data): string {
+		$fieldName = var_export($data['field_name'], true);
+		$templateName = var_export($data['template_name'], true);
+
+		return <<<PHP
+\$field = \$fields->get({$fieldName});
+if (!\$field->id) {
+	throw new WireException('Field not found: ' . {$fieldName});
+}
+
+\$template = \$templates->get({$templateName});
+if (!\$template->id) {
+	throw new WireException('Template not found: ' . {$templateName});
+}
+
+if (!\$template->fieldgroup->hasField(\$field)) {
+	\$template->fieldgroup->add(\$field);
+	\$fieldgroups->save(\$template->fieldgroup);
+}
+PHP;
+	}
+
+	protected function buildInstallModuleMigrationCode(array $data): string {
+		$moduleName = var_export($data['module_name'], true);
+
+		return <<<PHP
+if (!\$modules->isInstalled({$moduleName})) {
+	\$modules->install({$moduleName});
+}
+PHP;
+	}
+
+	protected function buildCreatePermissionMigrationCode(array $data): string {
+		$name = var_export($data['access_name'], true);
+
+		return <<<PHP
+\$permission = \$permissions->get({$name});
+if (!\$permission->id) {
+	\$permission = new Permission();
+	\$permission->name = {$name};
+	\$permissions->save(\$permission);
+}
+PHP;
+	}
+
+	protected function buildCreateRoleMigrationCode(array $data): string {
+		$name = var_export($data['access_name'], true);
+
+		return <<<PHP
+\$role = \$roles->get({$name});
+if (!\$role->id) {
+	\$role = new Role();
+	\$role->name = {$name};
+	\$roles->save(\$role);
+}
+PHP;
+	}
+
+	protected function runMigration(string $filename): array {
+		if (!$this->ensureMigrationStore()) {
+			return ['success' => false, 'error' => 'Migration store is not available. Check database permissions and module logs.'];
+		}
+
+		if (!preg_match('/^[a-zA-Z0-9._-]+\.php$/', $filename)) {
+			return ['success' => false, 'error' => 'Invalid migration filename.'];
+		}
+
+		$path = $this->getMigrationsDir() . $filename;
+		if (!is_file($path)) {
+			return ['success' => false, 'error' => 'Migration file not found.'];
+		}
+
+		$applied = $this->getAppliedMigrations();
+		if (isset($applied[$filename])) {
+			return ['success' => false, 'error' => 'Migration has already been applied.'];
+		}
+
+		$checksum = hash_file('sha256', $path) ?: '';
+		$preBackup = '';
+		if ($this->pre_restore_backup) {
+			$preResult = $this->createBackup('regular');
+			if ($preResult['success']) {
+				$preBackup = $preResult['filename'];
+			} else {
+				return ['success' => false, 'error' => 'Pre-migration backup failed: ' . $preResult['error']];
+			}
+		}
+
+		$message = '';
+		try {
+			ob_start();
+			$result = $this->includeMigrationFile($path);
+			$output = trim((string)ob_get_clean());
+			if (is_string($result)) {
+				$message = $result;
+			} elseif (is_array($result) && isset($result['message'])) {
+				$message = (string)$result['message'];
+			}
+			if ($message === '' && $output !== '') {
+				$message = $output;
+			}
+
+			$user = $this->wire('user');
+			$stmt = $this->wire('database')->prepare("
+				INSERT INTO `" . self::MIGRATION_TABLE . "`
+					(filename, checksum, applied_at, applied_by, pre_backup, message)
+				VALUES
+					(:filename, :checksum, :applied_at, :applied_by, :pre_backup, :message)
+			");
+			$stmt->execute([
+				'filename'   => $filename,
+				'checksum'   => $checksum,
+				'applied_at' => date('Y-m-d H:i:s'),
+				'applied_by' => $user && $user->id ? (string)$user->name : '',
+				'pre_backup' => $preBackup,
+				'message'    => $message,
+			]);
+
+			$this->log()->save(self::LOG_NAME, "Migration applied: {$filename}" . ($preBackup ? " (pre-backup: {$preBackup})" : ''));
+			return ['success' => true, 'pre_backup' => $preBackup, 'message' => $message];
+		} catch (\Throwable $e) {
+			if (ob_get_level() > 0) ob_end_clean();
+			$this->log()->save(self::LOG_NAME, "Migration failed: {$filename}: " . $e->getMessage());
+			return ['success' => false, 'error' => $e->getMessage()];
+		}
+	}
+
+	protected function includeMigrationFile(string $path): mixed {
+		$runner = function(string $migrationPath) {
+			$wire = wire();
+			$config = $wire->config;
+			$database = $wire->database;
+			$fields = $wire->fields;
+			$fieldgroups = $wire->fieldgroups;
+			$templates = $wire->templates;
+			$pages = $wire->pages;
+			$modules = $wire->modules;
+			$permissions = $wire->permissions;
+			$roles = $wire->roles;
+			$sanitizer = $wire->sanitizer;
+
+			return include $migrationPath;
+		};
+
+		return $runner($path);
+	}
+
 	// ── Backblaze B2 ─────────────────────────────────────────────────────────
 
 	protected function getB2Token(): array|false {
@@ -2379,6 +3038,8 @@ HTML;
 
 		$dir = $this->wire('config')->paths->assets . self::BACKUP_DIR;
 		if (!is_dir($dir)) wireMkdir($dir, true);
+		if (!is_dir($this->getMigrationsDir())) @wireMkdir($this->getMigrationsDir(), true);
+		$this->ensureMigrationStore();
 
 		// .htaccess protection for local backups
 		$htaccess = dirname($dir) . '/.htaccess';

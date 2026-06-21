@@ -27,6 +27,7 @@ If this project helps your work, consider supporting future development: [GitHub
 - **Pre-restore auto-backup** — creates a safety backup of the current DB before any restore
 - **Exclude tables** — skip specific tables (e.g. cache, sessions) from all backups
 - **Database table sizes** — dashboard section showing largest tables, row estimates, data/index size, and backup inclusion status
+- **Git-tracked deployment migrations** — generate and run PHP migration files from a GUI section, with an execution log and optional pre-migration backup
 - **Inline labels** — add notes to any backup entry directly in the table
 - **Sort and filter** — sort by filename/date/size, filter by backup type
 - **Protected storage** — `site/assets/backups/db/` with `.htaccess` deny-all
@@ -139,6 +140,7 @@ site/assets/backups/db/              — backup directory (htaccess protected)
 site/assets/backups/db/.meta.json    — metadata for all backups
 site/assets/backups/db/.lock         — cron lock file (auto-removed)
 site/assets/backups/db/.chunks/      — temporary chunk storage during upload
+site/modules/ProcessDbBackup/migrations/ — Git-tracked deployment migrations
 ```
 
 ## Backup methods
@@ -157,6 +159,60 @@ Restore **overwrites the database**. A confirmation dialog is shown before proce
 **Partial restore** — select individual tables from the backup. Shows each table with a status badge (exists / new) and a "select all" checkbox.
 
 Restore is only available for backups with a local copy. B2-only backups must be downloaded manually first.
+
+## Deployment migrations
+
+The **DB Backup → Migrations** section generates and runs Git-tracked PHP migration files from:
+
+```text
+site/modules/ProcessDbBackup/migrations/
+```
+
+This is intended for ProcessWire schema/deployment changes such as creating fields, updating templates, adding permissions, installing modules, or creating system pages. It is not intended to restore live content from local development.
+
+Each migration file is applied once and recorded in the `process_db_backup_migrations` table with filename, checksum, user, timestamp, optional message, and pre-migration backup filename.
+
+The GUI generator can create starter migrations for:
+
+- Creating fields
+- Creating templates
+- Adding a field to a template
+- Installing a module
+- Creating permissions
+- Creating roles
+
+Generated files are intentionally plain PHP so they can be reviewed, edited, committed, and reused during deployment.
+
+Example:
+
+```php
+<?php namespace ProcessWire;
+
+$field = $fields->get('recipe_time');
+if (!$field->id) {
+	$field = new Field();
+	$field->name = 'recipe_time';
+	$field->type = $modules->get('FieldtypeInteger');
+	$field->label = 'Recipe time';
+	$fields->save($field);
+}
+
+$template = $templates->get('recipe');
+if ($template->id && !$template->fieldgroup->hasField($field)) {
+	$template->fieldgroup->add($field);
+	$fieldgroups->save($template->fieldgroup);
+}
+
+return 'Recipe fields migrated.';
+```
+
+Recommended workflow:
+
+1. Pull a fresh production backup to local before starting work.
+2. Commit template/module/file changes and migration files together.
+3. Upload files to production.
+4. Open **DB Backup → Migrations** and run pending migrations.
+5. Keep **Auto-backup before restore** enabled so a safety backup is created before each migration.
 
 ## Chunked upload
 

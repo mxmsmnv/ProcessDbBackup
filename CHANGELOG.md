@@ -2,6 +2,14 @@
 
 All notable changes to ProcessDbBackup are documented in this file.
 
+## 2.2.0 — 2026-06-21
+
+- Added a DB Backup → Migrations section for Git-tracked PHP deployment migrations
+- Added a GUI migration generator for common schema/deployment operations
+- Added a `process_db_backup_migrations` execution log with filename, checksum, user, timestamp, pre-backup, and message
+- Added one-click pending migration execution with optional pre-migration backup
+- Added migration folder documentation and workflow notes
+
 ## 2.1.2 — 2026-06-07
 
 - Fixed a first-run deprecation warning when schedule settings have not been saved yet
