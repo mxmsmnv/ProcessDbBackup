@@ -903,12 +903,14 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 					<label class="uk-form-label" for="pdb-migration-title">Name</label>
 					<div class="uk-form-controls">
 						<input id="pdb-migration-title" class="uk-input" name="migration_title" type="text" placeholder="Add recipe fields" required>
+						<p class="uk-text-meta uk-margin-small-top">Human-readable title for this migration file. It is also used to build the filename.</p>
 					</div>
 				</div>
 				<div class="uk-width-1-2@m">
 					<label class="uk-form-label" for="pdb-migration-message">Return message</label>
 					<div class="uk-form-controls">
 						<input id="pdb-migration-message" class="uk-input" name="migration_message" type="text" placeholder="Recipe schema migrated.">
+						<p class="uk-text-meta uk-margin-small-top">Optional success message shown after the migration runs. Leave blank to use the migration name.</p>
 					</div>
 				</div>
 				<div class="uk-width-1-1">
@@ -922,12 +924,14 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 							<label><input class="uk-radio pdb-migration-type" type="radio" name="migration_type" value="create_permission"> Create permission</label>
 							<label><input class="uk-radio pdb-migration-type" type="radio" name="migration_type" value="create_role"> Create role</label>
 						</div>
+						<p class="uk-text-meta uk-margin-small-top">Choose the schema change you want to generate. Migrations should change structure, not overwrite page content or field values.</p>
 					</div>
 				</div>
 				<div class="uk-width-1-3@m pdb-generator-field pdb-field-name-new">
 					<label class="uk-form-label" for="pdb-field-name-new">New field name</label>
 					<div class="uk-form-controls">
 						<input id="pdb-field-name-new" class="uk-input" name="field_name_new" type="text" placeholder="recipe_time">
+						<p class="uk-text-meta uk-margin-small-top">Machine name for a field that does not exist yet. Use lowercase letters, numbers, and underscores.</p>
 					</div>
 				</div>
 				<div class="uk-width-1-3@m pdb-generator-field pdb-field-name-existing">
@@ -937,6 +941,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 							<option value="">Select field...</option>
 							' . $fieldOptions . '
 						</select>
+						<p class="uk-text-meta uk-margin-small-top">Existing ProcessWire field to attach to a template. This does not create a new field.</p>
 					</div>
 				</div>
 				<div class="uk-width-1-3@m pdb-generator-field pdb-field-type">
@@ -945,18 +950,21 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 						<select id="pdb-field-type" class="uk-select" name="field_type">
 							' . $fieldTypeOptions . '
 						</select>
+						<p class="uk-text-meta uk-margin-small-top">Storage type for the new field. Use Text for simple strings, Textarea for longer text, Page for page references, etc.</p>
 					</div>
 				</div>
 				<div class="uk-width-1-3@m pdb-generator-field pdb-field-label">
 					<label class="uk-form-label" for="pdb-field-label">Field label</label>
 					<div class="uk-form-controls">
 						<input id="pdb-field-label" class="uk-input" name="field_label" type="text" placeholder="Recipe time">
+						<p class="uk-text-meta uk-margin-small-top">Editor-facing label shown in the ProcessWire admin. If blank, the field name is used.</p>
 					</div>
 				</div>
 				<div class="uk-width-1-3@m pdb-generator-field pdb-template-name-new">
 					<label class="uk-form-label" for="pdb-template-name-new">New template name</label>
 					<div class="uk-form-controls">
 						<input id="pdb-template-name-new" class="uk-input" name="template_name_new" type="text" placeholder="recipe">
+						<p class="uk-text-meta uk-margin-small-top">Machine name for a template that does not exist yet. The migration also creates its fieldgroup.</p>
 					</div>
 				</div>
 				<div class="uk-width-1-3@m pdb-generator-field pdb-template-name-existing">
@@ -966,6 +974,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 							<option value="">Select template...</option>
 							' . $templateOptions . '
 						</select>
+						<p class="uk-text-meta uk-margin-small-top">Existing template that should receive the selected field. Page content is not changed.</p>
 					</div>
 				</div>
 				<div class="uk-width-2-3@m pdb-generator-field pdb-template-fields">
@@ -974,6 +983,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 						<select id="pdb-template-fields" class="uk-select" name="template_fields[]" multiple size="8">
 							' . $templateFieldOptions . '
 						</select>
+						<p class="uk-text-meta uk-margin-small-top">Fields to add to the new template fieldgroup. Hold Cmd/Ctrl to select more than one.</p>
 					</div>
 				</div>
 				<div class="uk-width-1-3@m pdb-generator-field pdb-module-name">
@@ -983,12 +993,14 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 							<option value="">Select installable module...</option>
 							' . $moduleOptions . '
 						</select>
+						<p class="uk-text-meta uk-margin-small-top">Module to install during deployment if it is not installed yet. Only installable modules are listed.</p>
 					</div>
 				</div>
 				<div class="uk-width-1-3@m pdb-generator-field pdb-access-name">
 					<label class="uk-form-label" for="pdb-permission-name">Permission / role</label>
 					<div class="uk-form-controls">
 						<input id="pdb-permission-name" class="uk-input" name="access_name" type="text" placeholder="recipe-editor">
+						<p class="uk-text-meta uk-margin-small-top">Machine name for a new permission or role. Use lowercase words separated by hyphens.</p>
 					</div>
 				</div>
 				<div class="uk-width-1-1">
