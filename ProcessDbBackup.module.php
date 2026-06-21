@@ -1431,7 +1431,26 @@ HTML;
 			return '<div class="uk-alert uk-alert-success" uk-alert><p class="uk-margin-remove">Current schema matches latest snapshot <code>' . htmlspecialchars($filename) . '</code>.</p></div>';
 		}
 
-		$html = '<table class="uk-table uk-table-small uk-table-divider uk-table-hover">
+		$addedCount = count(array_filter($diff, fn($item) => ($item['type'] ?? '') === 'added'));
+		$changedCount = count(array_filter($diff, fn($item) => ($item['type'] ?? '') === 'changed'));
+		$removedCount = count(array_filter($diff, fn($item) => ($item['type'] ?? '') === 'removed'));
+		$manualCount = $changedCount + $removedCount;
+
+		$html = '
+		<div class="uk-flex uk-flex-middle uk-flex-wrap uk-margin-small-bottom" style="gap:8px">
+			<span class="uk-label uk-label-success">' . $addedCount . ' added</span>
+			<span class="uk-label uk-label-warning">' . $changedCount . ' changed</span>
+			<span class="uk-label uk-label-danger">' . $removedCount . ' removed</span>
+		</div>';
+
+		if ($manualCount > 0) {
+			$html .= '<div class="uk-alert uk-alert-warning" uk-alert><p class="uk-margin-remove">Changed and removed schema items are shown for review, but are not auto-generated into migration code because they can be destructive.</p></div>';
+		}
+		if ($addedCount === 0) {
+			$html .= '<div class="uk-alert uk-alert-primary" uk-alert><p class="uk-margin-remove">No added schema items found, so there is nothing safe to auto-generate. Review the changed/removed items manually.</p></div>';
+		}
+
+		$html .= '<table class="uk-table uk-table-small uk-table-divider uk-table-hover">
 			<thead><tr><th>Change</th><th>Item</th></tr></thead><tbody>';
 
 		foreach (array_slice($diff, 0, 20) as $item) {
