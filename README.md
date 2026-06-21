@@ -197,6 +197,8 @@ Snapshots include ProcessWire field definitions, template field assignments, per
 
 The latest snapshot is compared against the current schema and the UI shows added, removed, and changed schema items. This makes it easier to notice when a local schema change still needs a migration file before deployment.
 
+When the diff contains added schema items, the UI can generate a starter migration from the latest snapshot diff. Added fields, templates, permissions, and roles are converted to PHP migration code. Changed and removed items are left as comments for manual review.
+
 Example:
 
 ```php

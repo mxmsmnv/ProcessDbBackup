@@ -252,6 +252,19 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				}
 				$this->session->redirect($this->page->url . '?action=migrations');
 				return '';
+
+			case 'generate_migration_from_diff':
+				$result = $this->createMigrationFromLatestSchemaDiff();
+				if ($result['success']) {
+					$this->message('Migration file created from schema diff: ' . $result['filename']);
+					if (!empty($result['manual_count'])) {
+						$this->warning($result['manual_count'] . ' changed/removed schema item(s) need manual review.');
+					}
+				} else {
+					$this->error('Migration file was not created: ' . $result['error']);
+				}
+				$this->session->redirect($this->page->url . '?action=migrations');
+				return '';
 		}
 
 		$this->session->redirect($this->page->url);
@@ -865,6 +878,18 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 
 		if (!$latest) {
 			return $html . '<p class="uk-text-muted"><span uk-icon="icon: info"></span> No schema snapshots yet.</p>';
+		}
+
+		$canGenerate = !empty(array_filter($diff, fn($item) => $item['type'] === 'added'));
+		if ($canGenerate) {
+			$html .= '
+			<form method="post" action="' . $this->page->url . '" class="uk-margin-small-bottom">
+				' . $csrf . '
+				<input type="hidden" name="action" value="generate_migration_from_diff">
+				<button type="submit" class="uk-button uk-button-primary uk-button-small">
+					<span uk-icon="icon: code; ratio:.7"></span>&nbsp; Generate migration from added schema
+				</button>
+			</form>';
 		}
 
 		$html .= '
@@ -2441,6 +2466,111 @@ PHP;
 
 		usort($diff, fn($a, $b) => strcmp($a['scope'] . $a['name'], $b['scope'] . $b['name']));
 		return $diff;
+	}
+
+	protected function createMigrationFromLatestSchemaDiff(): array {
+		$snapshots = $this->getSchemaSnapshotFiles();
+		$latest = $snapshots[0] ?? null;
+		if (!$latest) {
+			return ['success' => false, 'error' => 'No schema snapshot found.'];
+		}
+
+		$diff = $this->diffSchemaSnapshot($latest['path']);
+		$current = $this->getCurrentSchemaSnapshot();
+		$added = array_values(array_filter($diff, fn($item) => $item['type'] === 'added'));
+		$manual = array_values(array_filter($diff, fn($item) => $item['type'] !== 'added'));
+		if (empty($added)) {
+			return ['success' => false, 'error' => 'No added schema items found in latest diff.'];
+		}
+
+		$code = $this->buildSchemaDiffMigrationCode($added, $manual, $current, $latest['filename']);
+		$dir = $this->getMigrationsDir();
+		if (!is_dir($dir) && !wireMkdir($dir, true)) {
+			return ['success' => false, 'error' => 'Cannot create migrations directory.'];
+		}
+
+		$filename = date('Y_m_d_His') . '_schema_diff.php';
+		$path = $dir . $filename;
+		$counter = 2;
+		while (file_exists($path)) {
+			$filename = date('Y_m_d_His') . '_schema_diff_' . $counter . '.php';
+			$path = $dir . $filename;
+			$counter++;
+		}
+
+		if (file_put_contents($path, $code, LOCK_EX) === false) {
+			return ['success' => false, 'error' => 'Could not write migration file.'];
+		}
+
+		return ['success' => true, 'filename' => $filename, 'manual_count' => count($manual)];
+	}
+
+	protected function buildSchemaDiffMigrationCode(array $added, array $manual, array $current, string $snapshotFilename): string {
+		$body = [];
+		$fieldAdds = array_values(array_filter($added, fn($item) => $item['scope'] === 'fields'));
+		$templateAdds = array_values(array_filter($added, fn($item) => $item['scope'] === 'templates'));
+		$permissionAdds = array_values(array_filter($added, fn($item) => $item['scope'] === 'permissions'));
+		$roleAdds = array_values(array_filter($added, fn($item) => $item['scope'] === 'roles'));
+
+		foreach ($fieldAdds as $item) {
+			$name = $item['name'];
+			$field = $current['fields'][$name] ?? [];
+			$body[] = $this->buildCreateFieldMigrationCode([
+				'field_name'  => $name,
+				'field_type'  => $field['type'] ?? 'FieldtypeText',
+				'field_label' => $field['label'] ?? $name,
+			]);
+		}
+
+		foreach ($templateAdds as $item) {
+			$name = $item['name'];
+			$template = $current['templates'][$name] ?? [];
+			$body[] = $this->buildCreateTemplateMigrationCode([
+				'template_name'   => $name,
+				'template_fields' => $template['fields'] ?? ['title'],
+			]);
+		}
+
+		foreach ($permissionAdds as $item) {
+			$body[] = $this->buildCreatePermissionMigrationCode(['access_name' => $item['name']]);
+		}
+
+		foreach ($roleAdds as $item) {
+			$body[] = $this->buildCreateRoleMigrationCode(['access_name' => $item['name']]);
+		}
+
+		if (!empty($manual)) {
+			$body[] = $this->buildManualReviewComment($manual);
+		}
+
+		$snapshot = var_export($snapshotFilename, true);
+		$bodyCode = implode("\n\n", array_filter($body));
+
+		return <<<PHP
+<?php namespace ProcessWire;
+
+/**
+ * Schema diff migration
+ *
+ * Generated from latest schema snapshot {$snapshotFilename}.
+ * Review before deploying to production.
+ */
+
+{$bodyCode}
+
+return 'Schema diff migration applied from snapshot ' . {$snapshot};
+PHP;
+	}
+
+	protected function buildManualReviewComment(array $manual): string {
+		$lines = ["// Manual review required for changed/removed schema items:"];
+		foreach ($manual as $item) {
+			$scope = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)$item['scope']);
+			$type = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)$item['type']);
+			$name = str_replace(["\r", "\n"], '', (string)$item['name']);
+			$lines[] = "// - {$type} {$scope}: {$name}";
+		}
+		return implode("\n", $lines);
 	}
 
 	protected function ksortRecursive(array &$array): void {

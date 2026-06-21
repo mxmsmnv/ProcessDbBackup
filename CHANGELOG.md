@@ -7,6 +7,7 @@ All notable changes to ProcessDbBackup are documented in this file.
 - Added a DB Backup → Migrations section for Git-tracked PHP deployment migrations
 - Added a GUI migration generator for common schema/deployment operations
 - Added Git-tracked schema snapshots and latest-snapshot diff summaries
+- Added starter migration generation from added schema items in the latest snapshot diff
 - Added a `process_db_backup_migrations` execution log with filename, checksum, user, timestamp, pre-backup, and message
 - Added one-click pending migration execution with optional pre-migration backup
 - Added migration folder documentation and workflow notes
