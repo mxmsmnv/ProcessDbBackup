@@ -888,73 +888,104 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 	}
 
 	protected function renderMigrationGenerator(string $csrf): string {
+		$fieldOptions = $this->renderSelectOptions($this->getFieldSelectOptions());
+		$templateOptions = $this->renderSelectOptions($this->getTemplateSelectOptions());
+		$fieldTypeOptions = $this->renderSelectOptions($this->getFieldtypeSelectOptions(), 'FieldtypeText');
+		$moduleOptions = $this->renderSelectOptions($this->getInstallableModuleSelectOptions());
+		$templateFieldOptions = $this->renderSelectOptions($this->getFieldSelectOptions(), 'title');
+
 		return '
 		<form method="post" action="' . $this->page->url . '" class="uk-form-stacked">
 			' . $csrf . '
 			<input type="hidden" name="action" value="create_migration">
 			<div class="uk-grid-small" uk-grid>
-				<div class="uk-width-1-3@m">
+				<div class="uk-width-1-2@m">
 					<label class="uk-form-label" for="pdb-migration-title">Name</label>
 					<div class="uk-form-controls">
 						<input id="pdb-migration-title" class="uk-input" name="migration_title" type="text" placeholder="Add recipe fields" required>
 					</div>
 				</div>
-				<div class="uk-width-1-3@m">
-					<label class="uk-form-label" for="pdb-migration-type">Operation</label>
-					<div class="uk-form-controls">
-						<select id="pdb-migration-type" class="uk-select" name="migration_type">
-							<option value="create_field">Create field</option>
-							<option value="create_template">Create template</option>
-							<option value="add_field_to_template">Add field to template</option>
-							<option value="install_module">Install module</option>
-							<option value="create_permission">Create permission</option>
-							<option value="create_role">Create role</option>
-						</select>
-					</div>
-				</div>
-				<div class="uk-width-1-3@m">
+				<div class="uk-width-1-2@m">
 					<label class="uk-form-label" for="pdb-migration-message">Return message</label>
 					<div class="uk-form-controls">
 						<input id="pdb-migration-message" class="uk-input" name="migration_message" type="text" placeholder="Recipe schema migrated.">
 					</div>
 				</div>
-				<div class="uk-width-1-4@m pdb-generator-field pdb-field-name">
-					<label class="uk-form-label" for="pdb-field-name">Field</label>
+				<div class="uk-width-1-1">
+					<label class="uk-form-label">Operation</label>
 					<div class="uk-form-controls">
-						<input id="pdb-field-name" class="uk-input" name="field_name" type="text" placeholder="recipe_time">
+						<div class="uk-grid-small uk-child-width-1-2@s uk-child-width-1-3@m" uk-grid>
+							<label><input class="uk-radio pdb-migration-type" type="radio" name="migration_type" value="create_field" checked> Create field</label>
+							<label><input class="uk-radio pdb-migration-type" type="radio" name="migration_type" value="create_template"> Create template</label>
+							<label><input class="uk-radio pdb-migration-type" type="radio" name="migration_type" value="add_field_to_template"> Add field to template</label>
+							<label><input class="uk-radio pdb-migration-type" type="radio" name="migration_type" value="install_module"> Install module</label>
+							<label><input class="uk-radio pdb-migration-type" type="radio" name="migration_type" value="create_permission"> Create permission</label>
+							<label><input class="uk-radio pdb-migration-type" type="radio" name="migration_type" value="create_role"> Create role</label>
+						</div>
 					</div>
 				</div>
-				<div class="uk-width-1-4@m pdb-generator-field pdb-field-type">
+				<div class="uk-width-1-3@m pdb-generator-field pdb-field-name-new">
+					<label class="uk-form-label" for="pdb-field-name-new">New field name</label>
+					<div class="uk-form-controls">
+						<input id="pdb-field-name-new" class="uk-input" name="field_name_new" type="text" placeholder="recipe_time">
+					</div>
+				</div>
+				<div class="uk-width-1-3@m pdb-generator-field pdb-field-name-existing">
+					<label class="uk-form-label" for="pdb-field-name-existing">Field</label>
+					<div class="uk-form-controls">
+						<select id="pdb-field-name-existing" class="uk-select" name="field_name_existing">
+							<option value="">Select field...</option>
+							' . $fieldOptions . '
+						</select>
+					</div>
+				</div>
+				<div class="uk-width-1-3@m pdb-generator-field pdb-field-type">
 					<label class="uk-form-label" for="pdb-field-type">Field type</label>
 					<div class="uk-form-controls">
-						<input id="pdb-field-type" class="uk-input" name="field_type" type="text" value="FieldtypeText">
+						<select id="pdb-field-type" class="uk-select" name="field_type">
+							' . $fieldTypeOptions . '
+						</select>
 					</div>
 				</div>
-				<div class="uk-width-1-4@m pdb-generator-field pdb-field-label">
+				<div class="uk-width-1-3@m pdb-generator-field pdb-field-label">
 					<label class="uk-form-label" for="pdb-field-label">Field label</label>
 					<div class="uk-form-controls">
 						<input id="pdb-field-label" class="uk-input" name="field_label" type="text" placeholder="Recipe time">
 					</div>
 				</div>
-				<div class="uk-width-1-4@m pdb-generator-field pdb-template-name">
-					<label class="uk-form-label" for="pdb-template-name">Template</label>
+				<div class="uk-width-1-3@m pdb-generator-field pdb-template-name-new">
+					<label class="uk-form-label" for="pdb-template-name-new">New template name</label>
 					<div class="uk-form-controls">
-						<input id="pdb-template-name" class="uk-input" name="template_name" type="text" placeholder="recipe">
+						<input id="pdb-template-name-new" class="uk-input" name="template_name_new" type="text" placeholder="recipe">
 					</div>
 				</div>
-				<div class="uk-width-1-2@m pdb-generator-field pdb-template-fields">
+				<div class="uk-width-1-3@m pdb-generator-field pdb-template-name-existing">
+					<label class="uk-form-label" for="pdb-template-name-existing">Template</label>
+					<div class="uk-form-controls">
+						<select id="pdb-template-name-existing" class="uk-select" name="template_name_existing">
+							<option value="">Select template...</option>
+							' . $templateOptions . '
+						</select>
+					</div>
+				</div>
+				<div class="uk-width-2-3@m pdb-generator-field pdb-template-fields">
 					<label class="uk-form-label" for="pdb-template-fields">Template fields</label>
 					<div class="uk-form-controls">
-						<input id="pdb-template-fields" class="uk-input" name="template_fields" type="text" placeholder="title, recipe_time, body">
+						<select id="pdb-template-fields" class="uk-select" name="template_fields[]" multiple size="8">
+							' . $templateFieldOptions . '
+						</select>
 					</div>
 				</div>
-				<div class="uk-width-1-4@m pdb-generator-field pdb-module-name">
+				<div class="uk-width-1-3@m pdb-generator-field pdb-module-name">
 					<label class="uk-form-label" for="pdb-module-name">Module</label>
 					<div class="uk-form-controls">
-						<input id="pdb-module-name" class="uk-input" name="module_name" type="text" placeholder="FieldtypeRepeater">
+						<select id="pdb-module-name" class="uk-select" name="module_name">
+							<option value="">Select installable module...</option>
+							' . $moduleOptions . '
+						</select>
 					</div>
 				</div>
-				<div class="uk-width-1-4@m pdb-generator-field pdb-access-name">
+				<div class="uk-width-1-3@m pdb-generator-field pdb-access-name">
 					<label class="uk-form-label" for="pdb-permission-name">Permission / role</label>
 					<div class="uk-form-controls">
 						<input id="pdb-permission-name" class="uk-input" name="access_name" type="text" placeholder="recipe-editor">
@@ -968,6 +999,63 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			</div>
 		</form>';
 		}
+
+	protected function renderSelectOptions(array $options, string $selected = ''): string {
+		$html = '';
+		foreach ($options as $value => $label) {
+			$value = (string)$value;
+			$html .= '<option value="' . htmlspecialchars($value) . '"' . ($value === $selected ? ' selected' : '') . '>' . htmlspecialchars((string)$label) . '</option>';
+		}
+		return $html;
+	}
+
+	protected function getFieldSelectOptions(): array {
+		$options = [];
+		foreach ($this->wire('fields') as $field) {
+			if (!$field->name) continue;
+			$label = (string)$field->label;
+			$options[$field->name] = $label !== '' && $label !== $field->name ? $field->name . ' - ' . $label : $field->name;
+		}
+		ksort($options, SORT_NATURAL | SORT_FLAG_CASE);
+		return $options;
+	}
+
+	protected function getTemplateSelectOptions(): array {
+		$options = [];
+		foreach ($this->wire('templates') as $template) {
+			if (!$template->name) continue;
+			$label = (string)$template->label;
+			$options[$template->name] = $label !== '' && $label !== $template->name ? $template->name . ' - ' . $label : $template->name;
+		}
+		ksort($options, SORT_NATURAL | SORT_FLAG_CASE);
+		return $options;
+	}
+
+	protected function getFieldtypeSelectOptions(): array {
+		$options = [];
+		foreach ($this->wire('modules')->findByPrefix('Fieldtype') as $name) {
+			$options[$name] = $name;
+		}
+		if (empty($options)) {
+			$options = [
+				'FieldtypeText'     => 'FieldtypeText',
+				'FieldtypeTextarea' => 'FieldtypeTextarea',
+				'FieldtypeInteger'  => 'FieldtypeInteger',
+				'FieldtypePage'     => 'FieldtypePage',
+			];
+		}
+		ksort($options, SORT_NATURAL | SORT_FLAG_CASE);
+		return $options;
+	}
+
+	protected function getInstallableModuleSelectOptions(): array {
+		$options = [];
+		foreach ($this->wire('modules')->getInstallable() as $name => $path) {
+			$options[$name] = $name;
+		}
+		ksort($options, SORT_NATURAL | SORT_FLAG_CASE);
+		return $options;
+	}
 
 	protected function renderDeleteMigrationForm(string $filename, string $csrf): string {
 		$filenameEsc = htmlspecialchars($filename);
@@ -1008,23 +1096,31 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		return <<<HTML
 		<script>
 		(function() {
-			const type = document.getElementById('pdb-migration-type');
-			if (!type) return;
+			const types = Array.from(document.querySelectorAll('.pdb-migration-type'));
+			if (!types.length) return;
 			const groups = {
-				create_field: ['pdb-field-name', 'pdb-field-type', 'pdb-field-label'],
-				create_template: ['pdb-template-name', 'pdb-template-fields'],
-				add_field_to_template: ['pdb-field-name', 'pdb-template-name'],
+				create_field: ['pdb-field-name-new', 'pdb-field-type', 'pdb-field-label'],
+				create_template: ['pdb-template-name-new', 'pdb-template-fields'],
+				add_field_to_template: ['pdb-field-name-existing', 'pdb-template-name-existing'],
 				install_module: ['pdb-module-name'],
 				create_permission: ['pdb-access-name'],
 				create_role: ['pdb-access-name']
 			};
 			const update = () => {
-				document.querySelectorAll('.pdb-generator-field').forEach(el => el.classList.add('uk-hidden'));
-				(groups[type.value] || []).forEach(cls => {
-					document.querySelectorAll('.' + cls).forEach(el => el.classList.remove('uk-hidden'));
+				const checked = document.querySelector('.pdb-migration-type:checked');
+				const active = checked ? checked.value : 'create_field';
+				document.querySelectorAll('.pdb-generator-field').forEach(el => {
+					el.classList.add('uk-hidden');
+					el.querySelectorAll('input, select, textarea').forEach(input => input.disabled = true);
+				});
+				(groups[active] || []).forEach(cls => {
+					document.querySelectorAll('.' + cls).forEach(el => {
+						el.classList.remove('uk-hidden');
+						el.querySelectorAll('input, select, textarea').forEach(input => input.disabled = false);
+					});
 				});
 			};
-			type.addEventListener('change', update);
+			types.forEach(type => type.addEventListener('change', update));
 			update();
 		})();
 		</script>
@@ -2563,15 +2659,23 @@ HTML;
 			return ['success' => false, 'error' => 'Migration name is required.'];
 		}
 
+		$fieldName = $this->input->post('field_name_existing') !== null
+			? (string)$this->input->post('field_name_existing')
+			: (string)($this->input->post('field_name_new') ?? $this->input->post('field_name') ?? '');
+		$templateName = $this->input->post('template_name_existing') !== null
+			? (string)$this->input->post('template_name_existing')
+			: (string)($this->input->post('template_name_new') ?? $this->input->post('template_name') ?? '');
+		$templateFieldsInput = $this->input->post('template_fields') ?? '';
+
 		$data = [
 			'type'            => $type,
 			'title'           => $title,
 			'message'         => $message,
-			'field_name'      => $this->sanitizePwName((string)($this->input->post('field_name') ?? '')),
+			'field_name'      => $this->sanitizePwName($fieldName),
 			'field_type'      => $this->sanitizeClassName((string)($this->input->post('field_type') ?? 'FieldtypeText')),
 			'field_label'     => $this->sanitizer->text((string)($this->input->post('field_label') ?? '')),
-			'template_name'   => $this->sanitizePwName((string)($this->input->post('template_name') ?? '')),
-			'template_fields' => $this->sanitizeNameList((string)($this->input->post('template_fields') ?? '')),
+			'template_name'   => $this->sanitizePwName($templateName),
+			'template_fields' => $this->sanitizeNameList($templateFieldsInput),
 			'module_name'     => $this->sanitizeClassName((string)($this->input->post('module_name') ?? '')),
 			'access_name'     => $this->sanitizeAccessName((string)($this->input->post('access_name') ?? '')),
 		];
@@ -2786,11 +2890,12 @@ HTML;
 		return preg_replace('/[^a-zA-Z0-9_]/', '', trim($value)) ?: '';
 	}
 
-	protected function sanitizeNameList(string $value): array {
-		$parts = preg_split('/[\s,]+/', $value) ?: [];
+	protected function sanitizeNameList($value): array {
+		$raw = is_array($value) ? $value : preg_split('/[\s,]+/', (string)$value);
+		$parts = $raw ?: [];
 		$names = [];
 		foreach ($parts as $part) {
-			$name = $this->sanitizePwName($part);
+			$name = $this->sanitizePwName((string)$part);
 			if ($name !== '') $names[] = $name;
 		}
 		return array_values(array_unique($names));
