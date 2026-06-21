@@ -2,6 +2,8 @@
 
 Place Git-tracked ProcessWire deployment migrations in this folder. Files can be written manually or generated from the **DB Backup -> Migrations** admin screen.
 
+JSON schema snapshots are stored in `snapshots/`.
+
 Migration files must use a safe filename such as:
 
 ```text

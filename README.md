@@ -28,6 +28,7 @@ If this project helps your work, consider supporting future development: [GitHub
 - **Exclude tables** — skip specific tables (e.g. cache, sessions) from all backups
 - **Database table sizes** — dashboard section showing largest tables, row estimates, data/index size, and backup inclusion status
 - **Git-tracked deployment migrations** — generate and run PHP migration files from a GUI section, with an execution log and optional pre-migration backup
+- **Schema snapshots** — export fields, templates, permissions, and roles as JSON and compare the latest snapshot with the current schema
 - **Inline labels** — add notes to any backup entry directly in the table
 - **Sort and filter** — sort by filename/date/size, filter by backup type
 - **Protected storage** — `site/assets/backups/db/` with `.htaccess` deny-all
@@ -141,6 +142,7 @@ site/assets/backups/db/.meta.json    — metadata for all backups
 site/assets/backups/db/.lock         — cron lock file (auto-removed)
 site/assets/backups/db/.chunks/      — temporary chunk storage during upload
 site/modules/ProcessDbBackup/migrations/ — Git-tracked deployment migrations
+site/modules/ProcessDbBackup/migrations/snapshots/ — Git-tracked schema snapshots
 ```
 
 ## Backup methods
@@ -182,6 +184,18 @@ The GUI generator can create starter migrations for:
 - Creating roles
 
 Generated files are intentionally plain PHP so they can be reviewed, edited, committed, and reused during deployment.
+
+### Schema snapshots
+
+The migrations screen can also create JSON schema snapshots in:
+
+```text
+site/modules/ProcessDbBackup/migrations/snapshots/
+```
+
+Snapshots include ProcessWire field definitions, template field assignments, permissions, and roles. They intentionally exclude pages, field values, users, sessions, caches, and uploads.
+
+The latest snapshot is compared against the current schema and the UI shows added, removed, and changed schema items. This makes it easier to notice when a local schema change still needs a migration file before deployment.
 
 Example:
 

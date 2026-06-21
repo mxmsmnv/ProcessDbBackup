@@ -44,6 +44,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 	const LOCK_FILE      = 'backups/db/.lock'; // base, type appended at runtime
 	const CHUNK_DIR      = 'backups/db/.chunks/';
 	const MIGRATIONS_DIR = 'migrations/';
+	const SNAPSHOTS_DIR  = 'migrations/snapshots/';
 	const MIGRATION_TABLE = 'process_db_backup_migrations';
 	const LOG_NAME       = 'db-backup';
 	const B2_API_AUTH    = 'https://api.backblazeb2.com/b2api/v3/b2_authorize_account';
@@ -238,6 +239,16 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 					$this->message('Migration file created: ' . $result['filename']);
 				} else {
 					$this->error('Migration file was not created: ' . $result['error']);
+				}
+				$this->session->redirect($this->page->url . '?action=migrations');
+				return '';
+
+			case 'create_schema_snapshot':
+				$result = $this->createSchemaSnapshot();
+				if ($result['success']) {
+					$this->message('Schema snapshot created: ' . $result['filename']);
+				} else {
+					$this->error('Schema snapshot was not created: ' . $result['error']);
 				}
 				$this->session->redirect($this->page->url . '?action=migrations');
 				return '';
@@ -680,6 +691,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		</div>';
 
 		$html .= $this->renderMigrationGenerator($csrf);
+		$html .= $this->renderSchemaSnapshots($csrf);
 
 		if (empty($migrations)) {
 			$html .= '
@@ -829,6 +841,79 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				</div>
 			</div>
 		</form>';
+	}
+
+	protected function renderSchemaSnapshots(string $csrf): string {
+		$snapshots = $this->getSchemaSnapshotFiles();
+		$latest = $snapshots[0] ?? null;
+		$diff = $latest ? $this->diffSchemaSnapshot($latest['path']) : [];
+		$snapshotDir = $this->getSnapshotsDir();
+
+		$html = '
+		<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Schema Snapshots</h3>
+		<div class="uk-flex uk-flex-between uk-flex-middle uk-flex-wrap uk-margin-small-bottom" style="gap:8px">
+			<p class="uk-text-small uk-text-muted uk-margin-remove">Snapshots store ProcessWire fields, templates, permissions, and roles as Git-friendly JSON. They do not include page content or field values.</p>
+			<form method="post" action="' . $this->page->url . '" class="uk-display-inline">
+				' . $csrf . '
+				<input type="hidden" name="action" value="create_schema_snapshot">
+				<button type="submit" class="uk-button uk-button-default uk-button-small">
+					<span uk-icon="icon: camera; ratio:.7"></span>&nbsp; Create snapshot
+				</button>
+			</form>
+		</div>
+		<p class="uk-text-small uk-text-muted">Folder: <code>' . htmlspecialchars($snapshotDir) . '</code></p>';
+
+		if (!$latest) {
+			return $html . '<p class="uk-text-muted"><span uk-icon="icon: info"></span> No schema snapshots yet.</p>';
+		}
+
+		$html .= '
+		<div class="uk-grid-small uk-child-width-1-2@m" uk-grid>
+			<div>
+				<table class="uk-table uk-table-small uk-table-divider uk-table-hover">
+					<thead><tr><th>Snapshot</th><th class="uk-text-right">Size</th></tr></thead>
+					<tbody>';
+
+		foreach (array_slice($snapshots, 0, 5) as $snapshot) {
+			$html .= '<tr>'
+				. '<td class="uk-text-small"><code>' . htmlspecialchars($snapshot['filename']) . '</code></td>'
+				. '<td class="uk-text-small uk-text-right uk-text-nowrap">' . $this->formatBytes((int)$snapshot['size']) . '</td>'
+				. '</tr>';
+		}
+
+		$html .= '</tbody></table></div><div>';
+		$html .= $this->renderSchemaDiffSummary($diff, $latest['filename']);
+		$html .= '</div></div>';
+
+		return $html;
+	}
+
+	protected function renderSchemaDiffSummary(array $diff, string $filename): string {
+		if (empty($diff)) {
+			return '<div class="uk-alert uk-alert-success" uk-alert><p class="uk-margin-remove">Current schema matches latest snapshot <code>' . htmlspecialchars($filename) . '</code>.</p></div>';
+		}
+
+		$html = '<table class="uk-table uk-table-small uk-table-divider uk-table-hover">
+			<thead><tr><th>Change</th><th>Item</th></tr></thead><tbody>';
+
+		foreach (array_slice($diff, 0, 20) as $item) {
+			$label = match($item['type']) {
+				'added'   => '<span class="uk-label uk-label-success">Added</span>',
+				'removed' => '<span class="uk-label uk-label-danger">Removed</span>',
+				default   => '<span class="uk-label uk-label-warning">Changed</span>',
+			};
+			$html .= '<tr>'
+				. '<td>' . $label . '</td>'
+				. '<td class="uk-text-small"><code>' . htmlspecialchars($item['scope']) . '</code> ' . htmlspecialchars($item['name']) . '</td>'
+				. '</tr>';
+		}
+
+		$remaining = count($diff) - 20;
+		if ($remaining > 0) {
+			$html .= '<tr><td colspan="2" class="uk-text-small uk-text-muted">+' . $remaining . ' more changes</td></tr>';
+		}
+
+		return $html . '</tbody></table>';
 	}
 	// ── Create backup ─────────────────────────────────────────────────────────
 
@@ -2222,6 +2307,150 @@ if (!\$role->id) {
 PHP;
 	}
 
+	protected function getSnapshotsDir(): string {
+		return __DIR__ . '/' . self::SNAPSHOTS_DIR;
+	}
+
+	protected function getSchemaSnapshotFiles(): array {
+		$dir = $this->getSnapshotsDir();
+		if (!is_dir($dir)) {
+			@wireMkdir($dir, true);
+		}
+		if (!is_dir($dir)) return [];
+
+		$files = glob($dir . '*.json') ?: [];
+		$snapshots = [];
+		foreach ($files as $path) {
+			if (!is_file($path) || !preg_match('/^[a-zA-Z0-9._-]+\.json$/', basename($path))) continue;
+			$snapshots[] = [
+				'filename' => basename($path),
+				'path'     => $path,
+				'size'     => filesize($path),
+				'mtime'    => filemtime($path),
+			];
+		}
+
+		usort($snapshots, fn($a, $b) => ($b['mtime'] <=> $a['mtime']) ?: strcmp($b['filename'], $a['filename']));
+		return $snapshots;
+	}
+
+	protected function createSchemaSnapshot(): array {
+		$dir = $this->getSnapshotsDir();
+		if (!is_dir($dir) && !wireMkdir($dir, true)) {
+			return ['success' => false, 'error' => 'Cannot create snapshots directory.'];
+		}
+
+		$snapshot = $this->getCurrentSchemaSnapshot();
+		$filename = 'schema-' . date('Y_m_d_His') . '.json';
+		$path = $dir . $filename;
+		$json = json_encode($snapshot, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+		if ($json === false) {
+			return ['success' => false, 'error' => 'Could not encode schema snapshot.'];
+		}
+		if (file_put_contents($path, $json . "\n", LOCK_EX) === false) {
+			return ['success' => false, 'error' => 'Could not write schema snapshot.'];
+		}
+
+		return ['success' => true, 'filename' => $filename];
+	}
+
+	protected function getCurrentSchemaSnapshot(): array {
+		$snapshot = [
+			'meta' => [
+				'generated_at' => date('c'),
+				'module'       => $this->className(),
+				'version'      => self::getModuleInfo()['version'] ?? null,
+			],
+			'fields'      => [],
+			'templates'   => [],
+			'permissions' => [],
+			'roles'       => [],
+		];
+
+		foreach ($this->wire('fields') as $field) {
+			if (!$field->name) continue;
+			$snapshot['fields'][$field->name] = [
+				'type'  => $field->type ? $field->type->className() : '',
+				'label' => (string)$field->label,
+			];
+		}
+
+		foreach ($this->wire('templates') as $template) {
+			if (!$template->name) continue;
+			$fieldNames = [];
+			if ($template->fieldgroup) {
+				foreach ($template->fieldgroup as $field) {
+					if ($field->name) $fieldNames[] = $field->name;
+				}
+			}
+			$snapshot['templates'][$template->name] = [
+				'label'  => (string)$template->label,
+				'fields' => $fieldNames,
+			];
+		}
+
+		foreach ($this->wire('permissions') as $permission) {
+			if ($permission->name) $snapshot['permissions'][] = $permission->name;
+		}
+
+		foreach ($this->wire('roles') as $role) {
+			if ($role->name) $snapshot['roles'][] = $role->name;
+		}
+
+		$this->ksortRecursive($snapshot['fields']);
+		$this->ksortRecursive($snapshot['templates']);
+		sort($snapshot['permissions'], SORT_NATURAL);
+		sort($snapshot['roles'], SORT_NATURAL);
+
+		return $snapshot;
+	}
+
+	protected function diffSchemaSnapshot(string $path): array {
+		$previous = json_decode((string)file_get_contents($path), true);
+		if (!is_array($previous)) return [];
+
+		$current = $this->getCurrentSchemaSnapshot();
+		$diff = [];
+
+		foreach (['fields', 'templates'] as $scope) {
+			$before = $previous[$scope] ?? [];
+			$after = $current[$scope] ?? [];
+			foreach (array_diff(array_keys($after), array_keys($before)) as $name) {
+				$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'added'];
+			}
+			foreach (array_diff(array_keys($before), array_keys($after)) as $name) {
+				$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'removed'];
+			}
+			foreach (array_intersect(array_keys($before), array_keys($after)) as $name) {
+				if ($before[$name] != $after[$name]) {
+					$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'changed'];
+				}
+			}
+		}
+
+		foreach (['permissions', 'roles'] as $scope) {
+			$before = $previous[$scope] ?? [];
+			$after = $current[$scope] ?? [];
+			foreach (array_diff($after, $before) as $name) {
+				$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'added'];
+			}
+			foreach (array_diff($before, $after) as $name) {
+				$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'removed'];
+			}
+		}
+
+		usort($diff, fn($a, $b) => strcmp($a['scope'] . $a['name'], $b['scope'] . $b['name']));
+		return $diff;
+	}
+
+	protected function ksortRecursive(array &$array): void {
+		ksort($array, SORT_NATURAL);
+		foreach ($array as &$value) {
+			if (is_array($value)) $this->ksortRecursive($value);
+		}
+		unset($value);
+	}
+
 	protected function runMigration(string $filename): array {
 		if (!$this->ensureMigrationStore()) {
 			return ['success' => false, 'error' => 'Migration store is not available. Check database permissions and module logs.'];
@@ -3039,6 +3268,7 @@ HTML;
 		$dir = $this->wire('config')->paths->assets . self::BACKUP_DIR;
 		if (!is_dir($dir)) wireMkdir($dir, true);
 		if (!is_dir($this->getMigrationsDir())) @wireMkdir($this->getMigrationsDir(), true);
+		if (!is_dir($this->getSnapshotsDir())) @wireMkdir($this->getSnapshotsDir(), true);
 		$this->ensureMigrationStore();
 
 		// .htaccess protection for local backups
