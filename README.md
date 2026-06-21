@@ -192,6 +192,8 @@ Migration files can be previewed from the GUI before running. The preview shows 
 
 When the module is configured as **Production**, running a migration requires typing `RUN ON PRODUCTION` in the migration form.
 
+Only one migration can run at a time. A migration lock is written while a migration is active and stale locks older than 1 hour are cleared automatically.
+
 ### Schema snapshots
 
 The migrations screen can also create JSON schema snapshots in:

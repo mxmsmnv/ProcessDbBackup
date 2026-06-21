@@ -42,6 +42,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 	const BACKUP_EXT     = '.sql.gz';
 	const META_FILE      = 'backups/db/.meta.json';
 	const LOCK_FILE      = 'backups/db/.lock'; // base, type appended at runtime
+	const MIGRATION_LOCK_FILE = 'backups/db/.migration.lock';
 	const CHUNK_DIR      = 'backups/db/.chunks/';
 	const MIGRATIONS_DIR = 'migrations/';
 	const SNAPSHOTS_DIR  = 'migrations/snapshots/';
@@ -712,6 +713,10 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		</div>';
 		if ($this->isProductionEnvironment()) {
 			$html .= '<div class="uk-alert uk-alert-warning" uk-alert><p class="uk-margin-remove"><strong>Production environment.</strong> Running a migration requires typing <code>RUN ON PRODUCTION</code>.</p></div>';
+		}
+		$lockStatus = $this->getMigrationLockStatus();
+		if ($lockStatus['locked']) {
+			$html .= '<div class="uk-alert uk-alert-warning" uk-alert><p class="uk-margin-remove"><strong>Migration lock active.</strong> Another migration appears to be running. Lock age: ' . (int)$lockStatus['age'] . 's.</p></div>';
 		}
 
 		$html .= $this->renderMigrationGenerator($csrf);
@@ -2387,6 +2392,44 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		return ['success' => true];
 	}
 
+	protected function getMigrationLockPath(): string {
+		return $this->wire('config')->paths->assets . self::MIGRATION_LOCK_FILE;
+	}
+
+	protected function getMigrationLockStatus(): array {
+		$path = $this->getMigrationLockPath();
+		if (!file_exists($path)) return ['locked' => false, 'age' => 0];
+		$age = time() - (int)file_get_contents($path);
+		if ($age > 3600) {
+			@unlink($path);
+			return ['locked' => false, 'age' => 0];
+		}
+		return ['locked' => true, 'age' => $age];
+	}
+
+	protected function acquireMigrationLock(): array {
+		$status = $this->getMigrationLockStatus();
+		if ($status['locked']) {
+			return ['success' => false, 'error' => 'Another migration is already running (lock age: ' . (int)$status['age'] . 's).'];
+		}
+
+		$path = $this->getMigrationLockPath();
+		$dir = dirname($path);
+		if (!is_dir($dir) && !wireMkdir($dir, true)) {
+			return ['success' => false, 'error' => 'Cannot create migration lock directory.'];
+		}
+		if (file_put_contents($path, time(), LOCK_EX) === false) {
+			return ['success' => false, 'error' => 'Cannot create migration lock.'];
+		}
+
+		return ['success' => true];
+	}
+
+	protected function releaseMigrationLock(): void {
+		$path = $this->getMigrationLockPath();
+		if (file_exists($path)) @unlink($path);
+	}
+
 	protected function validateMigrationGeneratorData(array $data): array {
 		switch ($data['type']) {
 			case 'create_field':
@@ -2867,6 +2910,9 @@ PHP;
 			return ['success' => false, 'error' => 'Migration has already been applied.'];
 		}
 
+		$lock = $this->acquireMigrationLock();
+		if (!$lock['success']) return $lock;
+
 		$checksum = hash_file('sha256', $path) ?: '';
 		$preBackup = '';
 		if ($this->pre_restore_backup) {
@@ -2874,6 +2920,7 @@ PHP;
 			if ($preResult['success']) {
 				$preBackup = $preResult['filename'];
 			} else {
+				$this->releaseMigrationLock();
 				return ['success' => false, 'error' => 'Pre-migration backup failed: ' . $preResult['error']];
 			}
 		}
@@ -2909,9 +2956,11 @@ PHP;
 			]);
 
 			$this->log()->save(self::LOG_NAME, "Migration applied: {$filename}" . ($preBackup ? " (pre-backup: {$preBackup})" : ''));
+			$this->releaseMigrationLock();
 			return ['success' => true, 'pre_backup' => $preBackup, 'message' => $message];
 		} catch (\Throwable $e) {
 			if (ob_get_level() > 0) ob_end_clean();
+			$this->releaseMigrationLock();
 			$this->log()->save(self::LOG_NAME, "Migration failed: {$filename}: " . $e->getMessage());
 			return ['success' => false, 'error' => $e->getMessage()];
 		}
