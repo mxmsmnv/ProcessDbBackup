@@ -904,6 +904,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		$csrf = $this->session->CSRF->renderInput();
 		$checksum = hash_file('sha256', $path) ?: '';
 		$lint = $this->lintMigrationFile($path);
+		$impact = $this->analyzeMigrationImpact($code);
 		$isApplied = (bool)($status['applied'] ?? false);
 		$hasManualReview = str_contains($code, 'Manual review required');
 		$statusBadge = $isApplied
@@ -933,6 +934,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		$lintAlert = !$lint['valid']
 			? '<div class="uk-alert uk-alert-danger" uk-alert><p class="uk-margin-remove"><strong>PHP syntax check failed.</strong></p><pre class="uk-text-small uk-margin-small-top">' . htmlspecialchars($lint['output']) . '</pre></div>'
 			: '';
+		$impactHtml = $this->renderMigrationImpact($impact);
 
 		return $this->renderSectionNav('migrations') . $backUrl . '
 		<div class="uk-flex uk-flex-between uk-flex-middle uk-flex-wrap uk-margin-small-bottom" style="gap:8px">
@@ -944,6 +946,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		</div>
 		' . $lintAlert . '
 		' . $manualAlert . '
+		' . $impactHtml . '
 		<pre class="uk-text-small" style="max-height:70vh;overflow:auto"><code>' . htmlspecialchars($code) . '</code></pre>';
 	}
 
@@ -2235,6 +2238,76 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			'valid'  => $exitCode === 0,
 			'output' => trim(implode("\n", $output)),
 		];
+	}
+
+	protected function analyzeMigrationImpact(string $code): array {
+		$impact = [
+			'fields'      => $this->extractMigrationReferences($code, 'fields'),
+			'templates'   => $this->extractMigrationReferences($code, 'templates'),
+			'modules'     => $this->extractMigrationReferences($code, 'modules', ['get', 'install']),
+			'permissions' => $this->extractMigrationReferences($code, 'permissions'),
+			'roles'       => $this->extractMigrationReferences($code, 'roles'),
+			'warnings'    => [],
+		];
+
+		$dangerPatterns = [
+			'/\bdelete\s*\(/i'        => 'delete() call detected',
+			'/\bremove\s*\(/i'        => 'remove() call detected',
+			'/\btruncate\b/i'         => 'TRUNCATE detected',
+			'/\bDROP\s+TABLE\b/i'     => 'DROP TABLE detected',
+			'/restoreBackup\s*\(/i'   => 'restoreBackup() call detected',
+			'/partialRestoreBackup\s*\(/i' => 'partialRestoreBackup() call detected',
+			'/->exec\s*\(/i'          => 'raw database exec() call detected',
+			'/->query\s*\(/i'         => 'raw database query() call detected',
+		];
+
+		foreach ($dangerPatterns as $pattern => $message) {
+			if (preg_match($pattern, $code)) $impact['warnings'][] = $message;
+		}
+
+		$impact['warnings'] = array_values(array_unique($impact['warnings']));
+		return $impact;
+	}
+
+	protected function extractMigrationReferences(string $code, string $apiName, array $methods = ['get']): array {
+		$refs = [];
+		foreach ($methods as $method) {
+			$pattern = '/\\$' . preg_quote($apiName, '/') . '->' . preg_quote($method, '/') . '\\(\\s*[\'"]([^\'"]+)[\'"]\\s*\\)/';
+			if (preg_match_all($pattern, $code, $matches)) {
+				foreach ($matches[1] as $name) {
+					$refs[] = $method === 'get' ? $name : $method . ': ' . $name;
+				}
+			}
+		}
+		$refs = array_values(array_unique($refs));
+		sort($refs, SORT_NATURAL);
+		return $refs;
+	}
+
+	protected function renderMigrationImpact(array $impact): string {
+		$rows = '';
+		foreach (['fields', 'templates', 'modules', 'permissions', 'roles'] as $scope) {
+			if (empty($impact[$scope])) continue;
+			$items = implode(', ', array_map(fn($item) => '<code>' . htmlspecialchars($item) . '</code>', $impact[$scope]));
+			$rows .= '<tr><td class="uk-text-small uk-text-uppercase uk-text-muted">' . htmlspecialchars($scope) . '</td><td class="uk-text-small">' . $items . '</td></tr>';
+		}
+
+		if ($rows === '' && empty($impact['warnings'])) {
+			return '<div class="uk-alert uk-alert-primary" uk-alert><p class="uk-margin-remove">No obvious ProcessWire schema references detected. Review the code before running.</p></div>';
+		}
+
+		$warningHtml = '';
+		if (!empty($impact['warnings'])) {
+			$warningHtml = '<div class="uk-alert uk-alert-warning" uk-alert><p class="uk-margin-remove"><strong>Potentially destructive operations detected:</strong> '
+				. htmlspecialchars(implode(', ', $impact['warnings']))
+				. '</p></div>';
+		}
+
+		$table = $rows !== ''
+			? '<table class="uk-table uk-table-small uk-table-divider uk-table-hover"><thead><tr><th>Scope</th><th>Detected references</th></tr></thead><tbody>' . $rows . '</tbody></table>'
+			: '';
+
+		return '<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Impact Preview</h3>' . $warningHtml . $table;
 	}
 
 	protected function validateMigrationGeneratorData(array $data): array {

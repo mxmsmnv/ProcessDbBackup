@@ -10,6 +10,7 @@ All notable changes to ProcessDbBackup are documented in this file.
 - Added starter migration generation from added schema items in the latest snapshot diff
 - Added migration file preview before running generated or hand-written migrations
 - Added PHP syntax preflight checks and blocked execution for invalid migration files
+- Added migration impact preview with detected schema references and destructive-operation warnings
 - Added a `process_db_backup_migrations` execution log with filename, checksum, user, timestamp, pre-backup, and message
 - Added one-click pending migration execution with optional pre-migration backup
 - Added migration folder documentation and workflow notes

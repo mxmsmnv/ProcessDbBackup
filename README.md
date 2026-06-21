@@ -185,7 +185,7 @@ The GUI generator can create starter migrations for:
 
 Generated files are intentionally plain PHP so they can be reviewed, edited, committed, and reused during deployment.
 
-Migration files can be previewed from the GUI before running. The preview shows the file contents, checksum, current applied/pending state, PHP syntax preflight status, and a warning when generated code contains manual-review comments. Migrations with PHP syntax errors cannot be run until fixed.
+Migration files can be previewed from the GUI before running. The preview shows the file contents, checksum, current applied/pending state, PHP syntax preflight status, detected schema references, potentially destructive operations, and a warning when generated code contains manual-review comments. Migrations with PHP syntax errors cannot be run until fixed.
 
 ### Schema snapshots
 
