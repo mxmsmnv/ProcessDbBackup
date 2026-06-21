@@ -285,7 +285,8 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				return '';
 
 			case 'generate_migration_from_diff':
-				$result = $this->createMigrationFromLatestSchemaDiff();
+				$snapshotFile = basename((string)($this->input->post('snapshot_file') ?? ''));
+				$result = $this->createMigrationFromSchemaDiff($snapshotFile);
 				if ($result['success']) {
 					$this->message('Migration file created from schema diff: ' . $result['filename']);
 					if (!empty($result['manual_count'])) {
@@ -1337,12 +1338,15 @@ HTML;
 	protected function renderSchemaSnapshots(string $csrf): string {
 		$snapshots = $this->getSchemaSnapshotFiles();
 		$latest = $snapshots[0] ?? null;
-		$diff = $latest ? $this->diffSchemaSnapshot($latest['path']) : [];
+		$selectedSnapshotFile = basename((string)($this->input->get('compare_snapshot') ?? ''));
+		$baseline = $selectedSnapshotFile !== '' ? $this->getSchemaSnapshotByFilename($selectedSnapshotFile) : $latest;
+		if (!$baseline) $baseline = $latest;
+		$diff = $baseline ? $this->diffSchemaSnapshot($baseline['path']) : [];
 
 		$html = '
-		<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Schema Snapshots</h3>
+		<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Schema Diff</h3>
 		<div class="uk-flex uk-flex-between uk-flex-middle uk-flex-wrap uk-margin-small-bottom" style="gap:8px">
-			<p class="uk-text-small uk-text-muted uk-margin-remove">Snapshots store ProcessWire fields, templates, permissions, and roles as Git-friendly JSON. They do not include page content or field values.</p>
+			<p class="uk-text-small uk-text-muted uk-margin-remove">Compare the current site structure against a saved snapshot. Snapshots include fields, templates, permissions, and roles, but not page content or field values.</p>
 			<form method="post" action="' . $this->page->url . '" class="uk-display-inline">
 				' . $csrf . '
 				<input type="hidden" name="action" value="create_schema_snapshot">
@@ -1357,12 +1361,15 @@ HTML;
 			return $html . '<p class="uk-text-muted"><span uk-icon="icon: info"></span> No schema snapshots yet.</p>';
 		}
 
+		$html .= $this->renderSchemaBaselineForm($snapshots, $baseline['filename']);
+
 		$canGenerate = !empty(array_filter($diff, fn($item) => $item['type'] === 'added'));
 		if ($canGenerate) {
 			$html .= '
 			<form method="post" action="' . $this->page->url . '" class="uk-margin-small-bottom">
 				' . $csrf . '
 				<input type="hidden" name="action" value="generate_migration_from_diff">
+				<input type="hidden" name="snapshot_file" value="' . htmlspecialchars($baseline['filename']) . '">
 				<button type="submit" class="uk-button uk-button-primary">
 					<span uk-icon="icon: code; ratio:.7"></span>&nbsp; Generate migration from added schema
 				</button>
@@ -1385,10 +1392,38 @@ HTML;
 		}
 
 		$html .= '</tbody></table></div><div>';
-		$html .= $this->renderSchemaDiffSummary($diff, $latest['filename']);
+		$html .= $this->renderSchemaDiffSummary($diff, $baseline['filename']);
 		$html .= '</div></div>';
 
 		return $html;
+	}
+
+	protected function renderSchemaBaselineForm(array $snapshots, string $selectedFilename): string {
+		$options = '';
+		foreach ($snapshots as $snapshot) {
+			$filename = $snapshot['filename'];
+			$label = $filename . ' (' . date('Y-m-d H:i', (int)$snapshot['mtime']) . ')';
+			$options .= '<option value="' . htmlspecialchars($filename) . '"' . ($filename === $selectedFilename ? ' selected' : '') . '>' . htmlspecialchars($label) . '</option>';
+		}
+
+		return '
+		<form method="get" action="' . $this->page->url . '" class="uk-form-stacked uk-margin-small-bottom">
+			<input type="hidden" name="action" value="migrations">
+			<label class="uk-form-label" for="pdb-schema-baseline">Compare current structure to</label>
+			<div class="uk-grid-small uk-flex-middle" uk-grid>
+				<div class="uk-width-expand">
+					<select id="pdb-schema-baseline" class="uk-select" name="compare_snapshot">
+						' . $options . '
+					</select>
+					<p class="uk-text-meta uk-margin-small-top">Use the snapshot from before your local schema changes as the baseline.</p>
+				</div>
+				<div>
+					<button type="submit" class="uk-button uk-button-default">
+						<span uk-icon="icon: refresh; ratio:.7"></span>&nbsp; Compare
+					</button>
+				</div>
+			</div>
+		</form>';
 	}
 
 	protected function renderSchemaDiffSummary(array $diff, string $filename): string {
@@ -3158,6 +3193,15 @@ PHP;
 		return $snapshots;
 	}
 
+	protected function getSchemaSnapshotByFilename(string $filename): ?array {
+		$filename = basename($filename);
+		if (!preg_match('/^schema-[a-zA-Z0-9._-]+\.json$/', $filename)) return null;
+		foreach ($this->getSchemaSnapshotFiles() as $snapshot) {
+			if ($snapshot['filename'] === $filename) return $snapshot;
+		}
+		return null;
+	}
+
 	protected function createSchemaSnapshot(): array {
 		$dir = $this->getSnapshotsDir();
 		if (!is_dir($dir) && !wireMkdir($dir, true)) {
@@ -3267,14 +3311,17 @@ PHP;
 		return $diff;
 	}
 
-	protected function createMigrationFromLatestSchemaDiff(): array {
-		$snapshots = $this->getSchemaSnapshotFiles();
-		$latest = $snapshots[0] ?? null;
-		if (!$latest) {
+	protected function createMigrationFromSchemaDiff(string $snapshotFilename = ''): array {
+		$baseline = $snapshotFilename !== '' ? $this->getSchemaSnapshotByFilename($snapshotFilename) : null;
+		if (!$baseline) {
+			$snapshots = $this->getSchemaSnapshotFiles();
+			$baseline = $snapshots[0] ?? null;
+		}
+		if (!$baseline) {
 			return ['success' => false, 'error' => 'No schema snapshot found.'];
 		}
 
-		$diff = $this->diffSchemaSnapshot($latest['path']);
+		$diff = $this->diffSchemaSnapshot($baseline['path']);
 		$current = $this->getCurrentSchemaSnapshot();
 		$added = array_values(array_filter($diff, fn($item) => $item['type'] === 'added'));
 		$manual = array_values(array_filter($diff, fn($item) => $item['type'] !== 'added'));
@@ -3282,7 +3329,7 @@ PHP;
 			return ['success' => false, 'error' => 'No added schema items found in latest diff.'];
 		}
 
-		$code = $this->buildSchemaDiffMigrationCode($added, $manual, $current, $latest['filename']);
+		$code = $this->buildSchemaDiffMigrationCode($added, $manual, $current, $baseline['filename']);
 		$dir = $this->getMigrationsDir();
 		if (!is_dir($dir) && !wireMkdir($dir, true)) {
 			return ['success' => false, 'error' => 'Cannot create migrations directory.'];
