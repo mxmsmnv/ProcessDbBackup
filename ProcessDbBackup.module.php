@@ -284,6 +284,28 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				}
 				$this->session->redirect($this->page->url . '?action=migrations');
 				return '';
+
+			case 'delete_pending_migration':
+				$file = basename((string)($this->input->post('migration_file') ?? ''));
+				$result = $this->deletePendingMigrationFile($file);
+				if ($result['success']) {
+					$this->message('Migration file deleted: ' . $file);
+				} else {
+					$this->error('Migration file was not deleted: ' . $result['error']);
+				}
+				$this->session->redirect($this->page->url . '?action=migrations');
+				return '';
+
+			case 'delete_snapshot':
+				$file = basename((string)($this->input->post('snapshot_file') ?? ''));
+				$result = $this->deleteSnapshotFile($file);
+				if ($result['success']) {
+					$this->message('Schema snapshot deleted: ' . $file);
+				} else {
+					$this->error('Schema snapshot was not deleted: ' . $result['error']);
+				}
+				$this->session->redirect($this->page->url . '?action=migrations');
+				return '';
 		}
 
 		$this->session->redirect($this->page->url);
@@ -788,6 +810,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 					<a href="' . $pageUrl . '?action=download_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
 						<span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download
 					</a>
+					' . $this->renderDeleteMigrationForm($m['filename'], $csrf) . '
 					<span class="uk-text-small uk-text-danger uk-margin-small-left">Fix syntax first</span>';
 			} else {
 				$confirm = "Apply migration {$m['filename']}?\nA pre-migration backup will be created if that setting is enabled.";
@@ -798,6 +821,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 					<a href="' . $pageUrl . '?action=download_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
 						<span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download
 					</a>
+					' . $this->renderDeleteMigrationForm($m['filename'], $csrf) . '
 				<form method="post" action="' . $pageUrl . '" class="uk-display-inline">
 					' . $csrf . '
 					<input type="hidden" name="action" value="run_migration">
@@ -907,6 +931,20 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 					</button>
 				</div>
 			</div>
+		</form>';
+	}
+
+	protected function renderDeleteMigrationForm(string $filename, string $csrf): string {
+		$filenameEsc = htmlspecialchars($filename);
+		$confirm = "Delete pending migration {$filename}?";
+		return '
+		<form method="post" action="' . $this->page->url . '" class="uk-display-inline">
+			' . $csrf . '
+			<input type="hidden" name="action" value="delete_pending_migration">
+			<input type="hidden" name="migration_file" value="' . $filenameEsc . '">
+			<button type="submit" class="uk-button uk-button-default uk-button-small" onclick="return confirm(\'' . addslashes($confirm) . '\')">
+				<span uk-icon="icon: trash; ratio:.7"></span>&nbsp; Delete
+			</button>
 		</form>';
 	}
 
@@ -1086,7 +1124,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			$html .= '<tr>'
 				. '<td class="uk-text-small"><code>' . htmlspecialchars($snapshot['filename']) . '</code></td>'
 				. '<td class="uk-text-small uk-text-right uk-text-nowrap">' . $this->formatBytes((int)$snapshot['size']) . '</td>'
-				. '<td class="uk-text-right"><a href="' . $this->page->url . '?action=download_snapshot&file=' . rawurlencode($snapshot['filename']) . '" class="uk-button uk-button-default uk-button-small"><span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download</a></td>'
+				. '<td class="uk-text-right"><a href="' . $this->page->url . '?action=download_snapshot&file=' . rawurlencode($snapshot['filename']) . '" class="uk-button uk-button-default uk-button-small"><span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download</a> ' . $this->renderDeleteSnapshotForm($snapshot['filename'], $csrf) . '</td>'
 				. '</tr>';
 		}
 
@@ -1123,6 +1161,20 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		}
 
 		return $html . '</tbody></table>';
+	}
+
+	protected function renderDeleteSnapshotForm(string $filename, string $csrf): string {
+		$filenameEsc = htmlspecialchars($filename);
+		$confirm = "Delete schema snapshot {$filename}?";
+		return '
+		<form method="post" action="' . $this->page->url . '" class="uk-display-inline">
+			' . $csrf . '
+			<input type="hidden" name="action" value="delete_snapshot">
+			<input type="hidden" name="snapshot_file" value="' . $filenameEsc . '">
+			<button type="submit" class="uk-button uk-button-default uk-button-small" onclick="return confirm(\'' . addslashes($confirm) . '\')">
+				<span uk-icon="icon: trash; ratio:.7"></span>&nbsp; Delete
+			</button>
+		</form>';
 	}
 	// ── Create backup ─────────────────────────────────────────────────────────
 
@@ -2295,6 +2347,36 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		}
 
 		return $list;
+	}
+
+	protected function deletePendingMigrationFile(string $filename): array {
+		if (!preg_match('/^[a-zA-Z0-9._-]+\.php$/', $filename)) {
+			return ['success' => false, 'error' => 'Invalid migration filename.'];
+		}
+		$applied = $this->getAppliedMigrations();
+		if (isset($applied[$filename])) {
+			return ['success' => false, 'error' => 'Applied migrations cannot be deleted from the GUI.'];
+		}
+		$path = $this->getMigrationsDir() . $filename;
+		if (!is_file($path)) {
+			return ['success' => false, 'error' => 'Migration file not found.'];
+		}
+		return @unlink($path)
+			? ['success' => true]
+			: ['success' => false, 'error' => 'Could not delete migration file.'];
+	}
+
+	protected function deleteSnapshotFile(string $filename): array {
+		if (!preg_match('/^[a-zA-Z0-9._-]+\.json$/', $filename)) {
+			return ['success' => false, 'error' => 'Invalid snapshot filename.'];
+		}
+		$path = $this->getSnapshotsDir() . $filename;
+		if (!is_file($path)) {
+			return ['success' => false, 'error' => 'Schema snapshot not found.'];
+		}
+		return @unlink($path)
+			? ['success' => true]
+			: ['success' => false, 'error' => 'Could not delete schema snapshot.'];
 	}
 
 	protected function createMigrationFileFromInput(): array {
