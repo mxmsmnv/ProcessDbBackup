@@ -115,6 +115,16 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			return '';
 		}
 
+		if ($action === 'download_migration') {
+			$this->downloadMigrationFile($this->input->get('file'));
+			return '';
+		}
+
+		if ($action === 'download_snapshot') {
+			$this->downloadSnapshotFile($this->input->get('file'));
+			return '';
+		}
+
 		if ($action === 'verify') {
 			return $this->renderVerify($this->input->get('file'));
 		}
@@ -765,6 +775,9 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				$action = '<a href="' . $pageUrl . '?action=view_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
 						<span uk-icon="icon: search; ratio:.7"></span>&nbsp; View
 					</a>
+					<a href="' . $pageUrl . '?action=download_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
+						<span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download
+					</a>
 					<a href="' . $pageUrl . '?action=migration_details&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
 						<span uk-icon="icon: info; ratio:.7"></span>&nbsp; Details
 					</a>';
@@ -772,12 +785,18 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				$action = '<a href="' . $pageUrl . '?action=view_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
 						<span uk-icon="icon: search; ratio:.7"></span>&nbsp; View
 					</a>
+					<a href="' . $pageUrl . '?action=download_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
+						<span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download
+					</a>
 					<span class="uk-text-small uk-text-danger uk-margin-small-left">Fix syntax first</span>';
 			} else {
 				$confirm = "Apply migration {$m['filename']}?\nA pre-migration backup will be created if that setting is enabled.";
 				$productionConfirm = $this->renderProductionConfirmInput();
 				$action = '<a href="' . $pageUrl . '?action=view_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
 						<span uk-icon="icon: search; ratio:.7"></span>&nbsp; View
+					</a>
+					<a href="' . $pageUrl . '?action=download_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
+						<span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download
 					</a>
 				<form method="post" action="' . $pageUrl . '" class="uk-display-inline">
 					' . $csrf . '
@@ -960,7 +979,10 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				<h3 class="uk-heading-divider uk-margin-remove-bottom">' . htmlspecialchars($filename) . '</h3>
 				<p class="uk-text-small uk-text-muted uk-margin-small-top">Checksum: <code>' . htmlspecialchars(substr($checksum, 0, 16)) . '</code> · ' . $statusBadge . ' · ' . $lintBadge . '</p>
 			</div>
-			<div>' . $runForm . '</div>
+			<div>
+				<a href="' . $this->page->url . '?action=download_migration&file=' . rawurlencode($filename) . '" class="uk-button uk-button-default uk-button-small"><span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download</a>
+				' . $runForm . '
+			</div>
 		</div>
 		' . $lintAlert . '
 		' . $manualAlert . '
@@ -1011,7 +1033,10 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				<tr><th>Message</th><td>' . $messageHtml . '</td></tr>
 			</tbody>
 		</table>
-		<p><a href="' . $this->page->url . '?action=view_migration&file=' . rawurlencode($filename) . '" class="uk-button uk-button-default uk-button-small"><span uk-icon="icon: search; ratio:.7"></span>&nbsp; View migration file</a></p>';
+		<p>
+			<a href="' . $this->page->url . '?action=view_migration&file=' . rawurlencode($filename) . '" class="uk-button uk-button-default uk-button-small"><span uk-icon="icon: search; ratio:.7"></span>&nbsp; View migration file</a>
+			<a href="' . $this->page->url . '?action=download_migration&file=' . rawurlencode($filename) . '" class="uk-button uk-button-default uk-button-small"><span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download</a>
+		</p>';
 	}
 
 	protected function renderSchemaSnapshots(string $csrf): string {
@@ -1054,13 +1079,14 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		<div class="uk-grid-small uk-child-width-1-2@m" uk-grid>
 			<div>
 				<table class="uk-table uk-table-small uk-table-divider uk-table-hover">
-					<thead><tr><th>Snapshot</th><th class="uk-text-right">Size</th></tr></thead>
+					<thead><tr><th>Snapshot</th><th class="uk-text-right">Size</th><th class="uk-text-right">Action</th></tr></thead>
 					<tbody>';
 
 		foreach (array_slice($snapshots, 0, 5) as $snapshot) {
 			$html .= '<tr>'
 				. '<td class="uk-text-small"><code>' . htmlspecialchars($snapshot['filename']) . '</code></td>'
 				. '<td class="uk-text-small uk-text-right uk-text-nowrap">' . $this->formatBytes((int)$snapshot['size']) . '</td>'
+				. '<td class="uk-text-right"><a href="' . $this->page->url . '?action=download_snapshot&file=' . rawurlencode($snapshot['filename']) . '" class="uk-button uk-button-default uk-button-small"><span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download</a></td>'
 				. '</tr>';
 		}
 
@@ -1923,6 +1949,40 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 
 		header('Content-Type: application/gzip');
 		header('Content-Disposition: attachment; filename="' . $filename . '"');
+		header('Content-Length: ' . filesize($filepath));
+		header('Cache-Control: no-cache, must-revalidate');
+		header('Pragma: no-cache');
+		readfile($filepath);
+		exit;
+	}
+
+	protected function downloadMigrationFile(string $filename): void {
+		$filename = basename((string)$filename);
+		if (!preg_match('/^[a-zA-Z0-9._-]+\.php$/', $filename)) {
+			$this->error('Invalid migration filename.');
+			return;
+		}
+		$this->downloadLocalFile($this->getMigrationsDir() . $filename, $filename, 'text/x-php');
+	}
+
+	protected function downloadSnapshotFile(string $filename): void {
+		$filename = basename((string)$filename);
+		if (!preg_match('/^[a-zA-Z0-9._-]+\.json$/', $filename)) {
+			$this->error('Invalid snapshot filename.');
+			return;
+		}
+		$this->downloadLocalFile($this->getSnapshotsDir() . $filename, $filename, 'application/json');
+	}
+
+	protected function downloadLocalFile(string $filepath, string $downloadName, string $contentType): void {
+		if (!is_file($filepath)) {
+			$this->error('File not found.');
+			return;
+		}
+
+		if (ob_get_level()) ob_end_clean();
+		header('Content-Type: ' . $contentType);
+		header('Content-Disposition: attachment; filename="' . basename($downloadName) . '"');
 		header('Content-Length: ' . filesize($filepath));
 		header('Cache-Control: no-cache, must-revalidate');
 		header('Pragma: no-cache');

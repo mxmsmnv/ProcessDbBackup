@@ -14,6 +14,7 @@ All notable changes to ProcessDbBackup are documented in this file.
 - Added environment-aware production confirmation before running migrations
 - Added applied migration details with execution metadata and checksum drift warnings
 - Added migration locking to prevent concurrent migration runs
+- Added GUI downloads for migration PHP files and schema snapshot JSON files
 - Added a `process_db_backup_migrations` execution log with filename, checksum, user, timestamp, pre-backup, and message
 - Added one-click pending migration execution with optional pre-migration backup
 - Added migration folder documentation and workflow notes
