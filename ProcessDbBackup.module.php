@@ -899,18 +899,11 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			' . $csrf . '
 			<input type="hidden" name="action" value="create_migration">
 			<div class="uk-grid-small" uk-grid>
-				<div class="uk-width-1-2@m">
+				<div class="uk-width-1-1">
 					<label class="uk-form-label" for="pdb-migration-title">Name</label>
 					<div class="uk-form-controls">
 						<input id="pdb-migration-title" class="uk-input" name="migration_title" type="text" placeholder="Add recipe fields" required>
 						<p class="uk-text-meta uk-margin-small-top">Human-readable title for this migration file. It is also used to build the filename.</p>
-					</div>
-				</div>
-				<div class="uk-width-1-2@m">
-					<label class="uk-form-label" for="pdb-migration-message">Return message</label>
-					<div class="uk-form-controls">
-						<input id="pdb-migration-message" class="uk-input" name="migration_message" type="text" placeholder="Recipe schema migrated.">
-						<p class="uk-text-meta uk-margin-small-top">Optional success message shown after the migration runs. Leave blank to use the migration name.</p>
 					</div>
 				</div>
 				<div class="uk-width-1-1">
@@ -1004,6 +997,16 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 					</div>
 				</div>
 				<div class="uk-width-1-1">
+					<details class="uk-margin-small-bottom">
+						<summary class="uk-text-small uk-text-muted">Advanced options</summary>
+						<div class="uk-margin-small-top">
+							<label class="uk-form-label" for="pdb-migration-message">Return message</label>
+							<div class="uk-form-controls">
+								<input id="pdb-migration-message" class="uk-input" name="migration_message" type="text" placeholder="Recipe schema migrated.">
+								<p class="uk-text-meta uk-margin-small-top">Optional success message shown after the migration runs. Leave blank to use the migration name.</p>
+							</div>
+						</div>
+					</details>
 					<button type="submit" class="uk-button uk-button-primary">
 						<span uk-icon="icon: file-edit; ratio:.7"></span>&nbsp; Create migration file
 					</button>
