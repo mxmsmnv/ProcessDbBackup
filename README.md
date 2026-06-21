@@ -142,8 +142,8 @@ site/assets/backups/db/              — backup directory (htaccess protected)
 site/assets/backups/db/.meta.json    — metadata for all backups
 site/assets/backups/db/.lock         — cron lock file (auto-removed)
 site/assets/backups/db/.chunks/      — temporary chunk storage during upload
-site/modules/ProcessDbBackup/migrations/ — Git-tracked deployment migrations
-site/modules/ProcessDbBackup/migrations/snapshots/ — Git-tracked schema snapshots
+site/assets/ProcessDbBackup/migrations/ — deployment migration PHP files
+site/assets/ProcessDbBackup/snapshots/ — schema snapshot JSON files
 ```
 
 ## Backup methods
@@ -165,10 +165,10 @@ Restore is only available for backups with a local copy. B2-only backups must be
 
 ## Deployment migrations
 
-The **DB Backup → Migrations** section generates and runs Git-tracked PHP migration files from:
+The **DB Backup → Migrations** section generates and runs PHP migration files from:
 
 ```text
-site/modules/ProcessDbBackup/migrations/
+site/assets/ProcessDbBackup/migrations/
 ```
 
 This is intended for ProcessWire schema/deployment changes such as creating fields, updating templates, adding permissions, installing modules, or creating system pages. It is not intended to restore live content from local development.
@@ -204,7 +204,7 @@ Only one migration can run at a time. A migration lock is written while a migrat
 The migrations screen can also create JSON schema snapshots in:
 
 ```text
-site/modules/ProcessDbBackup/migrations/snapshots/
+site/assets/ProcessDbBackup/snapshots/
 ```
 
 Snapshots include ProcessWire field definitions, template field assignments, permissions, and roles. They intentionally exclude pages, field values, users, sessions, caches, and uploads.

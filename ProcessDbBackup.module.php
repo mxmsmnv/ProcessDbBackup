@@ -44,8 +44,9 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 	const LOCK_FILE      = 'backups/db/.lock'; // base, type appended at runtime
 	const MIGRATION_LOCK_FILE = 'backups/db/.migration.lock';
 	const CHUNK_DIR      = 'backups/db/.chunks/';
-	const MIGRATIONS_DIR = 'migrations/';
-	const SNAPSHOTS_DIR  = 'migrations/snapshots/';
+	const STORAGE_DIR    = 'ProcessDbBackup/';
+	const MIGRATIONS_DIR = 'ProcessDbBackup/migrations/';
+	const SNAPSHOTS_DIR  = 'ProcessDbBackup/snapshots/';
 	const MIGRATION_TABLE = 'process_db_backup_migrations';
 	const LOG_NAME       = 'db-backup';
 	const B2_API_AUTH    = 'https://api.backblazeb2.com/b2api/v3/b2_authorize_account';
@@ -73,6 +74,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 
 		// Migrate legacy meta entries — only in admin context, not on every frontend request
 		if ($this->wire('page') && $this->wire('page')->template == 'admin') {
+			$this->ensureRuntimeStorage();
 			$this->migrateMeta();
 			$this->ensureMigrationStore();
 		}
@@ -735,23 +737,19 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 
 		$html = $this->renderSectionNav('migrations');
 		$html .= '
-		<div class="uk-grid-small uk-child-width-auto uk-margin-medium-bottom" uk-grid>
-			<div><div class="uk-card uk-card-default uk-card-small uk-card-body">
-				<div class="uk-text-lead uk-text-bold">' . count($pending) . '</div>
-				<div class="uk-text-small uk-text-muted uk-text-uppercase">Pending</div>
-			</div></div>
-			<div><div class="uk-card uk-card-default uk-card-small uk-card-body">
-				<div class="uk-text-lead uk-text-bold">' . count($applied) . '</div>
-				<div class="uk-text-small uk-text-muted uk-text-uppercase">Applied</div>
-			</div></div>
-			<div><div class="uk-card uk-card-default uk-card-small uk-card-body">
-				<div class="uk-text-small uk-text-bold"><code>' . htmlspecialchars($dir) . '</code></div>
-				<div class="uk-text-small uk-text-muted uk-text-uppercase">Migration folder</div>
-			</div></div>
+		<div class="uk-flex uk-flex-between uk-flex-middle uk-flex-wrap uk-margin-medium-bottom pdb-migration-status" style="gap:12px">
+			<div class="uk-flex uk-flex-middle uk-flex-wrap" style="gap:8px">
+				<span class="uk-label uk-label-warning">' . count($pending) . ' pending</span>
+				<span class="uk-label uk-label-success">' . count($applied) . ' applied</span>
+				<span class="uk-text-small uk-text-muted">Storage: <code>' . htmlspecialchars($this->getRelativeAssetsPath(self::MIGRATIONS_DIR)) . '</code></span>
+			</div>
+			<a href="' . $this->wire('config')->urls->admin . 'module/edit?name=' . $this->className() . '" class="uk-button uk-button-default uk-button-small">
+				<span uk-icon="icon: settings; ratio:.7"></span>&nbsp; Settings
+			</a>
 		</div>
 
-		<div class="uk-alert uk-alert-primary" uk-alert>
-			<p class="uk-margin-remove">Migration files are PHP scripts stored in the module <code>migrations/</code> folder and can be committed to Git. They are meant for schema and deployment changes, not for overwriting live content.</p>
+		<div class="uk-alert uk-alert-primary uk-margin-small-bottom" uk-alert>
+			<p class="uk-margin-remove">Migrations are PHP files stored in <code>site/assets/ProcessDbBackup/migrations/</code>. Use them for schema/deployment changes, not for overwriting live content.</p>
 		</div>';
 		if ($this->isProductionEnvironment()) {
 			$html .= '<div class="uk-alert uk-alert-warning" uk-alert><p class="uk-margin-remove"><strong>Production environment.</strong> Running a migration requires typing <code>RUN ON PRODUCTION</code>.</p></div>';
@@ -764,6 +762,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		$html .= $this->renderMigrationGenerator($csrf);
 		$html .= $this->renderMigrationUpload($csrf);
 		$html .= $this->renderSchemaSnapshots($csrf);
+		$html .= $this->renderMigrationScripts();
 
 		if (empty($migrations)) {
 			$html .= '
@@ -861,88 +860,91 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 
 	protected function renderMigrationGenerator(string $csrf): string {
 		return '
-		<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Create Migration</h3>
-		<form method="post" action="' . $this->page->url . '" class="uk-form-stacked uk-margin-medium-bottom">
-			' . $csrf . '
-			<input type="hidden" name="action" value="create_migration">
-			<div class="uk-grid-small" uk-grid>
-				<div class="uk-width-1-3@m">
-					<label class="uk-form-label" for="pdb-migration-title">Name</label>
-					<div class="uk-form-controls">
-						<input id="pdb-migration-title" class="uk-input" name="migration_title" type="text" placeholder="Add recipe fields" required>
-					</div>
+		<ul uk-accordion class="uk-margin-medium-bottom">
+			<li>
+				<a class="uk-accordion-title uk-text-small uk-text-uppercase uk-text-muted" href="#">Create Migration</a>
+				<div class="uk-accordion-content">
+					<form method="post" action="' . $this->page->url . '" class="uk-form-stacked">
+						' . $csrf . '
+						<input type="hidden" name="action" value="create_migration">
+						<div class="uk-grid-small" uk-grid>
+							<div class="uk-width-1-3@m">
+								<label class="uk-form-label" for="pdb-migration-title">Name</label>
+								<div class="uk-form-controls">
+									<input id="pdb-migration-title" class="uk-input" name="migration_title" type="text" placeholder="Add recipe fields" required>
+								</div>
+							</div>
+							<div class="uk-width-1-3@m">
+								<label class="uk-form-label" for="pdb-migration-type">Operation</label>
+								<div class="uk-form-controls">
+									<select id="pdb-migration-type" class="uk-select" name="migration_type">
+										<option value="create_field">Create field</option>
+										<option value="create_template">Create template</option>
+										<option value="add_field_to_template">Add field to template</option>
+										<option value="install_module">Install module</option>
+										<option value="create_permission">Create permission</option>
+										<option value="create_role">Create role</option>
+									</select>
+								</div>
+							</div>
+							<div class="uk-width-1-3@m">
+								<label class="uk-form-label" for="pdb-migration-message">Return message</label>
+								<div class="uk-form-controls">
+									<input id="pdb-migration-message" class="uk-input" name="migration_message" type="text" placeholder="Recipe schema migrated.">
+								</div>
+							</div>
+							<div class="uk-width-1-4@m pdb-generator-field pdb-field-name">
+								<label class="uk-form-label" for="pdb-field-name">Field</label>
+								<div class="uk-form-controls">
+									<input id="pdb-field-name" class="uk-input" name="field_name" type="text" placeholder="recipe_time">
+								</div>
+							</div>
+							<div class="uk-width-1-4@m pdb-generator-field pdb-field-type">
+								<label class="uk-form-label" for="pdb-field-type">Field type</label>
+								<div class="uk-form-controls">
+									<input id="pdb-field-type" class="uk-input" name="field_type" type="text" value="FieldtypeText">
+								</div>
+							</div>
+							<div class="uk-width-1-4@m pdb-generator-field pdb-field-label">
+								<label class="uk-form-label" for="pdb-field-label">Field label</label>
+								<div class="uk-form-controls">
+									<input id="pdb-field-label" class="uk-input" name="field_label" type="text" placeholder="Recipe time">
+								</div>
+							</div>
+							<div class="uk-width-1-4@m pdb-generator-field pdb-template-name">
+								<label class="uk-form-label" for="pdb-template-name">Template</label>
+								<div class="uk-form-controls">
+									<input id="pdb-template-name" class="uk-input" name="template_name" type="text" placeholder="recipe">
+								</div>
+							</div>
+							<div class="uk-width-1-2@m pdb-generator-field pdb-template-fields">
+								<label class="uk-form-label" for="pdb-template-fields">Template fields</label>
+								<div class="uk-form-controls">
+									<input id="pdb-template-fields" class="uk-input" name="template_fields" type="text" placeholder="title, recipe_time, body">
+								</div>
+							</div>
+							<div class="uk-width-1-4@m pdb-generator-field pdb-module-name">
+								<label class="uk-form-label" for="pdb-module-name">Module</label>
+								<div class="uk-form-controls">
+									<input id="pdb-module-name" class="uk-input" name="module_name" type="text" placeholder="FieldtypeRepeater">
+								</div>
+							</div>
+							<div class="uk-width-1-4@m pdb-generator-field pdb-access-name">
+								<label class="uk-form-label" for="pdb-permission-name">Permission / role</label>
+								<div class="uk-form-controls">
+									<input id="pdb-permission-name" class="uk-input" name="access_name" type="text" placeholder="recipe-editor">
+								</div>
+							</div>
+							<div class="uk-width-1-1">
+								<button type="submit" class="uk-button uk-button-primary uk-button-small">
+									<span uk-icon="icon: file-edit; ratio:.7"></span>&nbsp; Create migration file
+								</button>
+							</div>
+						</div>
+					</form>
 				</div>
-				<div class="uk-width-1-3@m">
-					<label class="uk-form-label" for="pdb-migration-type">Operation</label>
-					<div class="uk-form-controls">
-						<select id="pdb-migration-type" class="uk-select" name="migration_type">
-							<option value="create_field">Create field</option>
-							<option value="create_template">Create template</option>
-							<option value="add_field_to_template">Add field to template</option>
-							<option value="install_module">Install module</option>
-							<option value="create_permission">Create permission</option>
-							<option value="create_role">Create role</option>
-						</select>
-					</div>
-				</div>
-				<div class="uk-width-1-3@m">
-					<label class="uk-form-label" for="pdb-migration-message">Return message</label>
-					<div class="uk-form-controls">
-						<input id="pdb-migration-message" class="uk-input" name="migration_message" type="text" placeholder="Recipe schema migrated.">
-					</div>
-				</div>
-
-				<div class="uk-width-1-4@m">
-					<label class="uk-form-label" for="pdb-field-name">Field</label>
-					<div class="uk-form-controls">
-						<input id="pdb-field-name" class="uk-input" name="field_name" type="text" placeholder="recipe_time">
-					</div>
-				</div>
-				<div class="uk-width-1-4@m">
-					<label class="uk-form-label" for="pdb-field-type">Field type</label>
-					<div class="uk-form-controls">
-						<input id="pdb-field-type" class="uk-input" name="field_type" type="text" value="FieldtypeText">
-					</div>
-				</div>
-				<div class="uk-width-1-4@m">
-					<label class="uk-form-label" for="pdb-field-label">Field label</label>
-					<div class="uk-form-controls">
-						<input id="pdb-field-label" class="uk-input" name="field_label" type="text" placeholder="Recipe time">
-					</div>
-				</div>
-				<div class="uk-width-1-4@m">
-					<label class="uk-form-label" for="pdb-template-name">Template</label>
-					<div class="uk-form-controls">
-						<input id="pdb-template-name" class="uk-input" name="template_name" type="text" placeholder="recipe">
-					</div>
-				</div>
-
-				<div class="uk-width-1-2@m">
-					<label class="uk-form-label" for="pdb-template-fields">Template fields</label>
-					<div class="uk-form-controls">
-						<input id="pdb-template-fields" class="uk-input" name="template_fields" type="text" placeholder="title, recipe_time, body">
-					</div>
-				</div>
-				<div class="uk-width-1-4@m">
-					<label class="uk-form-label" for="pdb-module-name">Module</label>
-					<div class="uk-form-controls">
-						<input id="pdb-module-name" class="uk-input" name="module_name" type="text" placeholder="FieldtypeRepeater">
-					</div>
-				</div>
-				<div class="uk-width-1-4@m">
-					<label class="uk-form-label" for="pdb-permission-name">Permission / role</label>
-					<div class="uk-form-controls">
-						<input id="pdb-permission-name" class="uk-input" name="access_name" type="text" placeholder="recipe-editor">
-					</div>
-				</div>
-
-				<div class="uk-width-1-1">
-					<button type="submit" class="uk-button uk-button-default">
-						<span uk-icon="icon: file-edit; ratio:.8"></span>&nbsp; Create migration file
-					</button>
-				</div>
-			</div>
-		</form>';
+			</li>
+		</ul>';
 	}
 
 	protected function renderDeleteMigrationForm(string $filename, string $csrf): string {
@@ -961,24 +963,57 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 
 	protected function renderMigrationUpload(string $csrf): string {
 		return '
-		<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Upload Migration</h3>
-		<form method="post" action="' . $this->page->url . '" enctype="multipart/form-data" class="uk-form-stacked uk-margin-medium-bottom">
-			' . $csrf . '
-			<input type="hidden" name="action" value="upload_migration_file">
-			<div class="uk-grid-small uk-flex-middle" uk-grid>
-				<div class="uk-width-expand">
-					<div uk-form-custom="target: true">
-						<input type="file" name="migration_upload" accept=".php" required>
-						<input class="uk-input" type="text" placeholder="Select migration .php file..." readonly>
-					</div>
+		<ul uk-accordion class="uk-margin-medium-bottom">
+			<li>
+				<a class="uk-accordion-title uk-text-small uk-text-uppercase uk-text-muted" href="#">Upload Migration</a>
+				<div class="uk-accordion-content">
+					<form method="post" action="' . $this->page->url . '" enctype="multipart/form-data" class="uk-form-stacked">
+						' . $csrf . '
+						<input type="hidden" name="action" value="upload_migration_file">
+						<div class="uk-grid-small uk-flex-middle" uk-grid>
+							<div class="uk-width-expand">
+								<div uk-form-custom="target: true">
+									<input type="file" name="migration_upload" accept=".php" required>
+									<input class="uk-input" type="text" placeholder="Select migration .php file..." readonly>
+								</div>
+							</div>
+							<div>
+								<button type="submit" class="uk-button uk-button-default uk-button-small">
+									<span uk-icon="icon: upload; ratio:.7"></span>&nbsp; Upload migration
+								</button>
+							</div>
+						</div>
+					</form>
 				</div>
-				<div>
-					<button type="submit" class="uk-button uk-button-default">
-						<span uk-icon="icon: upload; ratio:.8"></span>&nbsp; Upload migration
-					</button>
-				</div>
-			</div>
-		</form>';
+			</li>
+		</ul>';
+	}
+
+	protected function renderMigrationScripts(): string {
+		return <<<HTML
+		<script>
+		(function() {
+			const type = document.getElementById('pdb-migration-type');
+			if (!type) return;
+			const groups = {
+				create_field: ['pdb-field-name', 'pdb-field-type', 'pdb-field-label'],
+				create_template: ['pdb-template-name', 'pdb-template-fields'],
+				add_field_to_template: ['pdb-field-name', 'pdb-template-name'],
+				install_module: ['pdb-module-name'],
+				create_permission: ['pdb-access-name'],
+				create_role: ['pdb-access-name']
+			};
+			const update = () => {
+				document.querySelectorAll('.pdb-generator-field').forEach(el => el.classList.add('uk-hidden'));
+				(groups[type.value] || []).forEach(cls => {
+					document.querySelectorAll('.' + cls).forEach(el => el.classList.remove('uk-hidden'));
+				});
+			};
+			type.addEventListener('change', update);
+			update();
+		})();
+		</script>
+HTML;
 	}
 
 	protected function renderMigrationPreview(string $filename): string {
@@ -2320,10 +2355,51 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 	}
 
 	protected function getMigrationsDir(): string {
-		return __DIR__ . '/' . self::MIGRATIONS_DIR;
+		return $this->wire('config')->paths->assets . self::MIGRATIONS_DIR;
+	}
+
+	protected function getRelativeAssetsPath(string $path): string {
+		return 'site/assets/' . ltrim($path, '/');
+	}
+
+	protected function ensureRuntimeStorage(): void {
+		$baseDir = $this->wire('config')->paths->assets . self::STORAGE_DIR;
+		$migrationsDir = $this->getMigrationsDir();
+		$snapshotsDir = $this->getSnapshotsDir();
+
+		foreach ([$baseDir, $migrationsDir, $snapshotsDir] as $dir) {
+			if (!is_dir($dir)) @wireMkdir($dir, true);
+		}
+
+		$htaccess = $baseDir . '.htaccess';
+		if (!file_exists($htaccess)) {
+			file_put_contents($htaccess, "Order Deny,Allow\nDeny from all\nRequire all denied\n", LOCK_EX);
+		}
+
+		$this->migrateLegacyRuntimeFiles($migrationsDir, $snapshotsDir);
+	}
+
+	protected function migrateLegacyRuntimeFiles(string $migrationsDir, string $snapshotsDir): void {
+		$legacyMigrationsDir = __DIR__ . '/migrations/';
+		$legacySnapshotsDir = __DIR__ . '/migrations/snapshots/';
+
+		if (is_dir($legacyMigrationsDir)) {
+			foreach (glob($legacyMigrationsDir . '*.php') ?: [] as $path) {
+				$target = $migrationsDir . basename($path);
+				if (!file_exists($target)) @rename($path, $target);
+			}
+		}
+
+		if (is_dir($legacySnapshotsDir)) {
+			foreach (glob($legacySnapshotsDir . '*.json') ?: [] as $path) {
+				$target = $snapshotsDir . basename($path);
+				if (!file_exists($target)) @rename($path, $target);
+			}
+		}
 	}
 
 	protected function getMigrationFiles(): array {
+		$this->ensureRuntimeStorage();
 		$dir = $this->getMigrationsDir();
 		if (!is_dir($dir)) {
 			@wireMkdir($dir, true);
@@ -2858,10 +2934,11 @@ PHP;
 	}
 
 	protected function getSnapshotsDir(): string {
-		return __DIR__ . '/' . self::SNAPSHOTS_DIR;
+		return $this->wire('config')->paths->assets . self::SNAPSHOTS_DIR;
 	}
 
 	protected function getSchemaSnapshotFiles(): array {
+		$this->ensureRuntimeStorage();
 		$dir = $this->getSnapshotsDir();
 		if (!is_dir($dir)) {
 			@wireMkdir($dir, true);
@@ -3950,8 +4027,7 @@ HTML;
 
 		$dir = $this->wire('config')->paths->assets . self::BACKUP_DIR;
 		if (!is_dir($dir)) wireMkdir($dir, true);
-		if (!is_dir($this->getMigrationsDir())) @wireMkdir($this->getMigrationsDir(), true);
-		if (!is_dir($this->getSnapshotsDir())) @wireMkdir($this->getSnapshotsDir(), true);
+		$this->ensureRuntimeStorage();
 		$this->ensureMigrationStore();
 
 		// .htaccess protection for local backups

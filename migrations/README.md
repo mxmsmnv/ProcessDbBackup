@@ -1,8 +1,20 @@
 # ProcessDbBackup migrations
 
-Place Git-tracked ProcessWire deployment migrations in this folder. Files can be written manually or generated from the **DB Backup -> Migrations** admin screen.
+This folder is kept for documentation/examples only.
 
-JSON schema snapshots are stored in `snapshots/`.
+Runtime migration files are stored outside the module so they survive module upgrades:
+
+```text
+site/assets/ProcessDbBackup/migrations/
+```
+
+Runtime schema snapshots are stored in:
+
+```text
+site/assets/ProcessDbBackup/snapshots/
+```
+
+Files can be written manually, uploaded, or generated from the **DB Backup -> Migrations** admin screen.
 
 Migration files must use a safe filename such as:
 

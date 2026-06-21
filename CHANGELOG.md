@@ -4,6 +4,8 @@ All notable changes to ProcessDbBackup are documented in this file.
 
 ## 2.2.0 — 2026-06-21
 
+- Moved runtime migration and schema snapshot storage to `site/assets/ProcessDbBackup/` so generated files survive module updates
+- Refined the Migrations UI with a compact status bar and collapsed create/upload tools
 - Added a DB Backup → Migrations section for Git-tracked PHP deployment migrations
 - Added a GUI migration generator for common schema/deployment operations
 - Added Git-tracked schema snapshots and latest-snapshot diff summaries
