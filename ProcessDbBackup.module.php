@@ -635,7 +635,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			$html .= '
 			<div class="uk-flex uk-flex-between uk-flex-middle uk-margin-small-bottom">
 				<p class="uk-text-small uk-text-muted uk-margin-remove">All ' . count($tableSizes) . ' tables by storage size. Estimated total: <strong>' . $totalDbSize . '</strong>.</p>
-				<a href="' . $this->wire('config')->urls->admin . 'module/edit?name=' . $this->className() . '#Inputfield_exclude_tables" class="uk-button uk-button-default uk-button-small">
+				<a href="' . $this->wire('config')->urls->admin . 'module/edit?name=' . $this->className() . '#Inputfield_exclude_tables" class="uk-button uk-button-default">
 					<span uk-icon="icon: settings; ratio:.7"></span>&nbsp; Exclude tables
 				</a>
 			</div>
@@ -701,7 +701,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				<span id="pdb-upload-msg" class="uk-text-small uk-text-muted"></span>
 			</div>
 			<div class="uk-margin-large-top uk-text-right">
-				<a href="' . $this->wire('config')->urls->admin . 'module/edit?name=' . $this->className() . '" class="uk-button uk-button-default uk-button-small">
+				<a href="' . $this->wire('config')->urls->admin . 'module/edit?name=' . $this->className() . '" class="uk-button uk-button-default">
 					<span uk-icon="icon: settings; ratio:.7"></span>&nbsp; Module settings
 				</a>
 			</div>';
@@ -755,7 +755,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				<span class="uk-label uk-label-success">' . count($applied) . ' applied</span>
 				<span class="uk-text-small uk-text-muted">Storage: <code>' . htmlspecialchars($this->getRelativeAssetsPath(self::MIGRATIONS_DIR)) . '</code></span>
 			</div>
-			<a href="' . $this->wire('config')->urls->admin . 'module/edit?name=' . $this->className() . '" class="uk-button uk-button-default uk-button-small">
+			<a href="' . $this->wire('config')->urls->admin . 'module/edit?name=' . $this->className() . '" class="uk-button uk-button-default">
 				<span uk-icon="icon: settings; ratio:.7"></span>&nbsp; Settings
 			</a>
 		</div>
@@ -816,20 +816,20 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				: '<span class="uk-label uk-label-danger" uk-tooltip="' . htmlspecialchars($m['lint_output']) . '">PHP error</span>';
 
 			if ($m['applied']) {
-				$action = '<a href="' . $pageUrl . '?action=view_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
+				$action = '<a href="' . $pageUrl . '?action=view_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default">
 						<span uk-icon="icon: search; ratio:.7"></span>&nbsp; View
 					</a>
-					<a href="' . $pageUrl . '?action=download_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
+					<a href="' . $pageUrl . '?action=download_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default">
 						<span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download
 					</a>
-					<a href="' . $pageUrl . '?action=migration_details&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
+					<a href="' . $pageUrl . '?action=migration_details&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default">
 						<span uk-icon="icon: info; ratio:.7"></span>&nbsp; Details
 					</a>';
 			} elseif (!$m['lint_valid']) {
-				$action = '<a href="' . $pageUrl . '?action=view_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
+				$action = '<a href="' . $pageUrl . '?action=view_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default">
 						<span uk-icon="icon: search; ratio:.7"></span>&nbsp; View
 					</a>
-					<a href="' . $pageUrl . '?action=download_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
+					<a href="' . $pageUrl . '?action=download_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default">
 						<span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download
 					</a>
 					' . $this->renderDeleteMigrationForm($m['filename'], $csrf) . '
@@ -837,10 +837,10 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			} else {
 				$confirm = "Apply migration {$m['filename']}?\nA pre-migration backup will be created if that setting is enabled.";
 				$productionConfirm = $this->renderProductionConfirmInput();
-				$action = '<a href="' . $pageUrl . '?action=view_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
+				$action = '<a href="' . $pageUrl . '?action=view_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default">
 						<span uk-icon="icon: search; ratio:.7"></span>&nbsp; View
 					</a>
-					<a href="' . $pageUrl . '?action=download_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
+					<a href="' . $pageUrl . '?action=download_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default">
 						<span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download
 					</a>
 					' . $this->renderDeleteMigrationForm($m['filename'], $csrf) . '
@@ -849,7 +849,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 					<input type="hidden" name="action" value="run_migration">
 					<input type="hidden" name="migration_file" value="' . $file . '">
 					' . $productionConfirm . '
-					<button type="submit" class="uk-button uk-button-primary uk-button-small" onclick="return confirm(\'' . addslashes($confirm) . '\')">
+					<button type="submit" class="uk-button uk-button-primary" onclick="return confirm(\'' . addslashes($confirm) . '\')">
 						<span uk-icon="icon: play; ratio:.7"></span>&nbsp; Run
 					</button>
 				</form>';
@@ -992,7 +992,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 					</div>
 				</div>
 				<div class="uk-width-1-1">
-					<button type="submit" class="uk-button uk-button-primary uk-button-small">
+					<button type="submit" class="uk-button uk-button-primary">
 						<span uk-icon="icon: file-edit; ratio:.7"></span>&nbsp; Create migration file
 					</button>
 				</div>
@@ -1065,7 +1065,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			' . $csrf . '
 			<input type="hidden" name="action" value="delete_pending_migration">
 			<input type="hidden" name="migration_file" value="' . $filenameEsc . '">
-			<button type="submit" class="uk-button uk-button-default uk-button-small" onclick="return confirm(\'' . addslashes($confirm) . '\')">
+			<button type="submit" class="uk-button uk-button-default" onclick="return confirm(\'' . addslashes($confirm) . '\')">
 				<span uk-icon="icon: trash; ratio:.7"></span>&nbsp; Delete
 			</button>
 		</form>';
@@ -1084,7 +1084,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 					</div>
 				</div>
 				<div>
-					<button type="submit" class="uk-button uk-button-default uk-button-small">
+					<button type="submit" class="uk-button uk-button-default">
 						<span uk-icon="icon: upload; ratio:.7"></span>&nbsp; Upload migration
 					</button>
 				</div>
@@ -1129,7 +1129,7 @@ HTML;
 
 	protected function renderMigrationPreview(string $filename): string {
 		$filename = basename($filename);
-		$backUrl = '<p><a href="' . $this->page->url . '?action=migrations" class="uk-button uk-button-default uk-button-small"><span uk-icon="icon: arrow-left; ratio:.7"></span>&nbsp; Back to migrations</a></p>';
+		$backUrl = '<p><a href="' . $this->page->url . '?action=migrations" class="uk-button uk-button-default"><span uk-icon="icon: arrow-left; ratio:.7"></span>&nbsp; Back to migrations</a></p>';
 		if (!preg_match('/^[a-zA-Z0-9._-]+\.php$/', $filename)) {
 			return $this->renderSectionNav('migrations') . $backUrl . '<div class="uk-alert uk-alert-danger" uk-alert>Invalid migration filename.</div>';
 		}
@@ -1176,7 +1176,7 @@ HTML;
 				<input type="hidden" name="action" value="run_migration">
 				<input type="hidden" name="migration_file" value="' . htmlspecialchars($filename) . '">
 				' . $productionConfirm . '
-				<button type="submit" class="uk-button uk-button-primary uk-button-small" onclick="return confirm(\'' . addslashes($confirm) . '\')">
+				<button type="submit" class="uk-button uk-button-primary" onclick="return confirm(\'' . addslashes($confirm) . '\')">
 					<span uk-icon="icon: play; ratio:.7"></span>&nbsp; Run migration
 				</button>
 			</form>';
@@ -1197,7 +1197,7 @@ HTML;
 				<p class="uk-text-small uk-text-muted uk-margin-small-top">Checksum: <code>' . htmlspecialchars(substr($checksum, 0, 16)) . '</code> · ' . $statusBadge . ' · ' . $lintBadge . '</p>
 			</div>
 			<div>
-				<a href="' . $this->page->url . '?action=download_migration&file=' . rawurlencode($filename) . '" class="uk-button uk-button-default uk-button-small"><span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download</a>
+				<a href="' . $this->page->url . '?action=download_migration&file=' . rawurlencode($filename) . '" class="uk-button uk-button-default"><span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download</a>
 				' . $runForm . '
 			</div>
 		</div>
@@ -1209,7 +1209,7 @@ HTML;
 
 	protected function renderMigrationDetails(string $filename): string {
 		$filename = basename($filename);
-		$backUrl = '<p><a href="' . $this->page->url . '?action=migrations" class="uk-button uk-button-default uk-button-small"><span uk-icon="icon: arrow-left; ratio:.7"></span>&nbsp; Back to migrations</a></p>';
+		$backUrl = '<p><a href="' . $this->page->url . '?action=migrations" class="uk-button uk-button-default"><span uk-icon="icon: arrow-left; ratio:.7"></span>&nbsp; Back to migrations</a></p>';
 		if (!preg_match('/^[a-zA-Z0-9._-]+\.php$/', $filename)) {
 			return $this->renderSectionNav('migrations') . $backUrl . '<div class="uk-alert uk-alert-danger" uk-alert>Invalid migration filename.</div>';
 		}
@@ -1251,8 +1251,8 @@ HTML;
 			</tbody>
 		</table>
 		<p>
-			<a href="' . $this->page->url . '?action=view_migration&file=' . rawurlencode($filename) . '" class="uk-button uk-button-default uk-button-small"><span uk-icon="icon: search; ratio:.7"></span>&nbsp; View migration file</a>
-			<a href="' . $this->page->url . '?action=download_migration&file=' . rawurlencode($filename) . '" class="uk-button uk-button-default uk-button-small"><span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download</a>
+			<a href="' . $this->page->url . '?action=view_migration&file=' . rawurlencode($filename) . '" class="uk-button uk-button-default"><span uk-icon="icon: search; ratio:.7"></span>&nbsp; View migration file</a>
+			<a href="' . $this->page->url . '?action=download_migration&file=' . rawurlencode($filename) . '" class="uk-button uk-button-default"><span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download</a>
 		</p>';
 	}
 
@@ -1268,7 +1268,7 @@ HTML;
 			<form method="post" action="' . $this->page->url . '" class="uk-display-inline">
 				' . $csrf . '
 				<input type="hidden" name="action" value="create_schema_snapshot">
-				<button type="submit" class="uk-button uk-button-default uk-button-small">
+				<button type="submit" class="uk-button uk-button-default">
 					<span uk-icon="icon: camera; ratio:.7"></span>&nbsp; Create snapshot
 				</button>
 			</form>
@@ -1285,7 +1285,7 @@ HTML;
 			<form method="post" action="' . $this->page->url . '" class="uk-margin-small-bottom">
 				' . $csrf . '
 				<input type="hidden" name="action" value="generate_migration_from_diff">
-				<button type="submit" class="uk-button uk-button-primary uk-button-small">
+				<button type="submit" class="uk-button uk-button-primary">
 					<span uk-icon="icon: code; ratio:.7"></span>&nbsp; Generate migration from added schema
 				</button>
 			</form>';
@@ -1302,7 +1302,7 @@ HTML;
 			$html .= '<tr>'
 				. '<td class="uk-text-small"><code>' . htmlspecialchars($snapshot['filename']) . '</code></td>'
 				. '<td class="uk-text-small uk-text-right uk-text-nowrap">' . $this->formatBytes((int)$snapshot['size']) . '</td>'
-				. '<td class="uk-text-right"><a href="' . $this->page->url . '?action=download_snapshot&file=' . rawurlencode($snapshot['filename']) . '" class="uk-button uk-button-default uk-button-small"><span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download</a> ' . $this->renderDeleteSnapshotForm($snapshot['filename'], $csrf) . '</td>'
+				. '<td class="uk-text-right"><a href="' . $this->page->url . '?action=download_snapshot&file=' . rawurlencode($snapshot['filename']) . '" class="uk-button uk-button-default"><span uk-icon="icon: download; ratio:.7"></span>&nbsp; Download</a> ' . $this->renderDeleteSnapshotForm($snapshot['filename'], $csrf) . '</td>'
 				. '</tr>';
 		}
 
@@ -1349,7 +1349,7 @@ HTML;
 			' . $csrf . '
 			<input type="hidden" name="action" value="delete_snapshot">
 			<input type="hidden" name="snapshot_file" value="' . $filenameEsc . '">
-			<button type="submit" class="uk-button uk-button-default uk-button-small" onclick="return confirm(\'' . addslashes($confirm) . '\')">
+			<button type="submit" class="uk-button uk-button-default" onclick="return confirm(\'' . addslashes($confirm) . '\')">
 				<span uk-icon="icon: trash; ratio:.7"></span>&nbsp; Delete
 			</button>
 		</form>';
@@ -3625,7 +3625,7 @@ PHP;
 				. $csrf
 				. '<input type="hidden" name="action" value="create_typed">'
 				. '<input type="hidden" name="backup_type" value="' . $type . '">'
-				. '<button type="submit" class="uk-button uk-button-default uk-button-small">'
+				. '<button type="submit" class="uk-button uk-button-default">'
 				. '<span uk-icon="icon: plus; ratio:.7"></span> Create now'
 				. '</button></form>';
 
