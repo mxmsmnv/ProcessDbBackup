@@ -130,6 +130,10 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			return $this->renderMigrationPreview($this->input->get('file'));
 		}
 
+		if ($action === 'migration_details') {
+			return $this->renderMigrationDetails($this->input->get('file'));
+		}
+
 		return $this->renderDashboard();
 	}
 
@@ -756,7 +760,9 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				$action = '<a href="' . $pageUrl . '?action=view_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
 						<span uk-icon="icon: search; ratio:.7"></span>&nbsp; View
 					</a>
-					<span class="uk-text-small uk-text-muted uk-margin-small-left">Already applied</span>';
+					<a href="' . $pageUrl . '?action=migration_details&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
+						<span uk-icon="icon: info; ratio:.7"></span>&nbsp; Details
+					</a>';
 			} elseif (!$m['lint_valid']) {
 				$action = '<a href="' . $pageUrl . '?action=view_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
 						<span uk-icon="icon: search; ratio:.7"></span>&nbsp; View
@@ -955,6 +961,52 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		' . $manualAlert . '
 		' . $impactHtml . '
 		<pre class="uk-text-small" style="max-height:70vh;overflow:auto"><code>' . htmlspecialchars($code) . '</code></pre>';
+	}
+
+	protected function renderMigrationDetails(string $filename): string {
+		$filename = basename($filename);
+		$backUrl = '<p><a href="' . $this->page->url . '?action=migrations" class="uk-button uk-button-default uk-button-small"><span uk-icon="icon: arrow-left; ratio:.7"></span>&nbsp; Back to migrations</a></p>';
+		if (!preg_match('/^[a-zA-Z0-9._-]+\.php$/', $filename)) {
+			return $this->renderSectionNav('migrations') . $backUrl . '<div class="uk-alert uk-alert-danger" uk-alert>Invalid migration filename.</div>';
+		}
+
+		$applied = $this->getAppliedMigrations();
+		$row = $applied[$filename] ?? null;
+		if (!$row) {
+			return $this->renderSectionNav('migrations') . $backUrl . '<div class="uk-alert uk-alert-warning" uk-alert>Migration has not been applied yet.</div>';
+		}
+
+		$path = $this->getMigrationsDir() . $filename;
+		$currentChecksum = is_file($path) ? (hash_file('sha256', $path) ?: '') : '';
+		$storedChecksum = (string)($row['checksum'] ?? '');
+		$checksumChanged = $currentChecksum !== '' && $storedChecksum !== '' && !hash_equals($storedChecksum, $currentChecksum);
+		$checksumAlert = $checksumChanged
+			? '<div class="uk-alert uk-alert-danger" uk-alert><p class="uk-margin-remove">The migration file has changed since it was applied. Review the file before reusing this deployment history.</p></div>'
+			: '';
+
+		$preBackup = (string)($row['pre_backup'] ?? '');
+		$preBackupHtml = $preBackup !== ''
+			? '<code>' . htmlspecialchars($preBackup) . '</code>'
+			: '<span class="uk-text-muted">-</span>';
+		$message = trim((string)($row['message'] ?? ''));
+		$messageHtml = $message !== ''
+			? '<pre class="uk-text-small uk-margin-remove">' . htmlspecialchars($message) . '</pre>'
+			: '<span class="uk-text-muted">-</span>';
+
+		return $this->renderSectionNav('migrations') . $backUrl . '
+		<h3 class="uk-heading-divider">' . htmlspecialchars($filename) . '</h3>
+		' . $checksumAlert . '
+		<table class="uk-table uk-table-small uk-table-divider">
+			<tbody>
+				<tr><th>Applied at</th><td>' . htmlspecialchars((string)($row['applied_at'] ?? '')) . '</td></tr>
+				<tr><th>Applied by</th><td>' . htmlspecialchars((string)($row['applied_by'] ?? '')) . '</td></tr>
+				<tr><th>Stored checksum</th><td><code>' . htmlspecialchars($storedChecksum) . '</code></td></tr>
+				<tr><th>Current checksum</th><td>' . ($currentChecksum ? '<code>' . htmlspecialchars($currentChecksum) . '</code>' : '<span class="uk-text-muted">File missing</span>') . '</td></tr>
+				<tr><th>Pre-backup</th><td>' . $preBackupHtml . '</td></tr>
+				<tr><th>Message</th><td>' . $messageHtml . '</td></tr>
+			</tbody>
+		</table>
+		<p><a href="' . $this->page->url . '?action=view_migration&file=' . rawurlencode($filename) . '" class="uk-button uk-button-default uk-button-small"><span uk-icon="icon: search; ratio:.7"></span>&nbsp; View migration file</a></p>';
 	}
 
 	protected function renderSchemaSnapshots(string $csrf): string {

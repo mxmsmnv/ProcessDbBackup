@@ -175,6 +175,8 @@ This is intended for ProcessWire schema/deployment changes such as creating fiel
 
 Each migration file is applied once and recorded in the `process_db_backup_migrations` table with filename, checksum, user, timestamp, optional message, and pre-migration backup filename.
 
+Applied migrations have a details screen showing the execution record, stored/current checksums, pre-backup filename, and returned message.
+
 The GUI generator can create starter migrations for:
 
 - Creating fields
