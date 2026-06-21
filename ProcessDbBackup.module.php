@@ -725,6 +725,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			<thead><tr>
 				<th>Migration</th>
 				<th>Status</th>
+				<th>Preflight</th>
 				<th>Checksum</th>
 				<th>Applied at</th>
 				<th>Pre-backup</th>
@@ -744,12 +745,20 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			}
 			$appliedAt = $m['applied_at'] ? htmlspecialchars($m['applied_at']) : '<span class="uk-text-muted">-</span>';
 			$preBackup = $m['pre_backup'] ? '<code>' . htmlspecialchars($m['pre_backup']) . '</code>' : '<span class="uk-text-muted">-</span>';
+			$lintBadge = $m['lint_valid']
+				? '<span class="uk-label uk-label-success">PHP OK</span>'
+				: '<span class="uk-label uk-label-danger" uk-tooltip="' . htmlspecialchars($m['lint_output']) . '">PHP error</span>';
 
 			if ($m['applied']) {
 				$action = '<a href="' . $pageUrl . '?action=view_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
 						<span uk-icon="icon: search; ratio:.7"></span>&nbsp; View
 					</a>
 					<span class="uk-text-small uk-text-muted uk-margin-small-left">Already applied</span>';
+			} elseif (!$m['lint_valid']) {
+				$action = '<a href="' . $pageUrl . '?action=view_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
+						<span uk-icon="icon: search; ratio:.7"></span>&nbsp; View
+					</a>
+					<span class="uk-text-small uk-text-danger uk-margin-small-left">Fix syntax first</span>';
 			} else {
 				$confirm = "Apply migration {$m['filename']}?\nA pre-migration backup will be created if that setting is enabled.";
 				$action = '<a href="' . $pageUrl . '?action=view_migration&file=' . rawurlencode($m['filename']) . '" class="uk-button uk-button-default uk-button-small">
@@ -768,6 +777,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			$html .= '<tr>'
 				. '<td class="uk-text-small uk-text-nowrap"><span uk-icon="icon: file-text; ratio:.8" class="uk-margin-small-right"></span><code>' . $file . '</code></td>'
 				. '<td>' . $status . '</td>'
+				. '<td>' . $lintBadge . '</td>'
 				. '<td class="uk-text-small"><code>' . $checksumShort . '</code></td>'
 				. '<td class="uk-text-small uk-text-muted uk-text-nowrap">' . $appliedAt . '</td>'
 				. '<td class="uk-text-small uk-text-nowrap">' . $preBackup . '</td>'
@@ -893,14 +903,18 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 
 		$csrf = $this->session->CSRF->renderInput();
 		$checksum = hash_file('sha256', $path) ?: '';
+		$lint = $this->lintMigrationFile($path);
 		$isApplied = (bool)($status['applied'] ?? false);
 		$hasManualReview = str_contains($code, 'Manual review required');
 		$statusBadge = $isApplied
 			? '<span class="uk-label uk-label-success">Applied</span>'
 			: '<span class="uk-label uk-label-warning">Pending</span>';
+		$lintBadge = $lint['valid']
+			? '<span class="uk-label uk-label-success">PHP OK</span>'
+			: '<span class="uk-label uk-label-danger">PHP error</span>';
 
 		$runForm = '';
-		if (!$isApplied) {
+		if (!$isApplied && $lint['valid']) {
 			$confirm = "Apply migration {$filename}?\nA pre-migration backup will be created if that setting is enabled.";
 			$runForm = '
 			<form method="post" action="' . $this->page->url . '" class="uk-display-inline">
@@ -916,15 +930,19 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		$manualAlert = $hasManualReview
 			? '<div class="uk-alert uk-alert-warning" uk-alert><p class="uk-margin-remove">This generated migration contains manual-review comments. Review changed/removed schema items before running it on production.</p></div>'
 			: '';
+		$lintAlert = !$lint['valid']
+			? '<div class="uk-alert uk-alert-danger" uk-alert><p class="uk-margin-remove"><strong>PHP syntax check failed.</strong></p><pre class="uk-text-small uk-margin-small-top">' . htmlspecialchars($lint['output']) . '</pre></div>'
+			: '';
 
 		return $this->renderSectionNav('migrations') . $backUrl . '
 		<div class="uk-flex uk-flex-between uk-flex-middle uk-flex-wrap uk-margin-small-bottom" style="gap:8px">
 			<div>
 				<h3 class="uk-heading-divider uk-margin-remove-bottom">' . htmlspecialchars($filename) . '</h3>
-				<p class="uk-text-small uk-text-muted uk-margin-small-top">Checksum: <code>' . htmlspecialchars(substr($checksum, 0, 16)) . '</code> · ' . $statusBadge . '</p>
+				<p class="uk-text-small uk-text-muted uk-margin-small-top">Checksum: <code>' . htmlspecialchars(substr($checksum, 0, 16)) . '</code> · ' . $statusBadge . ' · ' . $lintBadge . '</p>
 			</div>
 			<div>' . $runForm . '</div>
 		</div>
+		' . $lintAlert . '
 		' . $manualAlert . '
 		<pre class="uk-text-small" style="max-height:70vh;overflow:auto"><code>' . htmlspecialchars($code) . '</code></pre>';
 	}
@@ -2132,11 +2150,14 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		foreach ($this->getMigrationFiles() as $path) {
 			$filename = basename($path);
 			$checksum = hash_file('sha256', $path) ?: '';
+			$lint = $this->lintMigrationFile($path);
 			$row = $applied[$filename] ?? null;
 			$list[] = [
 				'filename'          => $filename,
 				'path'              => $path,
 				'checksum'          => $checksum,
+				'lint_valid'        => $lint['valid'],
+				'lint_output'       => $lint['output'],
 				'applied'           => (bool)$row,
 				'checksum_mismatch' => $row && !hash_equals((string)$row['checksum'], $checksum),
 				'applied_at'        => $row['applied_at'] ?? '',
@@ -2199,6 +2220,21 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		}
 
 		return ['success' => true, 'filename' => $filename];
+	}
+
+	protected function lintMigrationFile(string $path): array {
+		if (!is_file($path)) {
+			return ['valid' => false, 'output' => 'Migration file not found.'];
+		}
+
+		$cmd = 'php -l ' . escapeshellarg($path) . ' 2>&1';
+		$output = [];
+		$exitCode = 0;
+		exec($cmd, $output, $exitCode);
+		return [
+			'valid'  => $exitCode === 0,
+			'output' => trim(implode("\n", $output)),
+		];
 	}
 
 	protected function validateMigrationGeneratorData(array $data): array {
@@ -2666,6 +2702,11 @@ PHP;
 		$path = $this->getMigrationsDir() . $filename;
 		if (!is_file($path)) {
 			return ['success' => false, 'error' => 'Migration file not found.'];
+		}
+
+		$lint = $this->lintMigrationFile($path);
+		if (!$lint['valid']) {
+			return ['success' => false, 'error' => 'PHP syntax check failed: ' . $lint['output']];
 		}
 
 		$applied = $this->getAppliedMigrations();
