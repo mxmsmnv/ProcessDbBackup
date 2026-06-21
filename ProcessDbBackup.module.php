@@ -1440,9 +1440,10 @@ HTML;
 				'removed' => '<span class="uk-label uk-label-danger">Removed</span>',
 				default   => '<span class="uk-label uk-label-warning">Changed</span>',
 			};
+			$details = $this->renderSchemaDiffDetails($item);
 			$html .= '<tr>'
 				. '<td>' . $label . '</td>'
-				. '<td class="uk-text-small"><code>' . htmlspecialchars($item['scope']) . '</code> ' . htmlspecialchars($item['name']) . '</td>'
+				. '<td class="uk-text-small"><code>' . htmlspecialchars($item['scope']) . '</code> ' . htmlspecialchars($item['name']) . $details . '</td>'
 				. '</tr>';
 		}
 
@@ -1452,6 +1453,47 @@ HTML;
 		}
 
 		return $html . '</tbody></table>';
+	}
+
+	protected function renderSchemaDiffDetails(array $item): string {
+		$type = $item['type'] ?? '';
+		$before = $item['before'] ?? null;
+		$after = $item['after'] ?? null;
+
+		if ($type === 'added') {
+			$text = $this->formatSchemaDiffValue($after);
+			return $text !== '' ? '<div class="uk-text-meta uk-margin-small-top">Added: ' . htmlspecialchars($text) . '</div>' : '';
+		}
+		if ($type === 'removed') {
+			$text = $this->formatSchemaDiffValue($before);
+			return $text !== '' ? '<div class="uk-text-meta uk-margin-small-top">Removed: ' . htmlspecialchars($text) . '</div>' : '';
+		}
+
+		$beforeText = $this->formatSchemaDiffValue($before);
+		$afterText = $this->formatSchemaDiffValue($after);
+		if ($beforeText === '' && $afterText === '') return '';
+		return '<div class="uk-text-meta uk-margin-small-top">Before: ' . htmlspecialchars($beforeText ?: '-')
+			. '<br>After: ' . htmlspecialchars($afterText ?: '-') . '</div>';
+	}
+
+	protected function formatSchemaDiffValue($value): string {
+		if (!is_array($value)) return trim((string)$value);
+
+		if (isset($value['type']) || isset($value['label'])) {
+			$parts = [];
+			if (!empty($value['type'])) $parts[] = 'type=' . $value['type'];
+			if (!empty($value['label'])) $parts[] = 'label=' . $value['label'];
+			return implode(', ', $parts);
+		}
+
+		if (isset($value['fields']) && is_array($value['fields'])) {
+			$parts = [];
+			if (!empty($value['label'])) $parts[] = 'label=' . $value['label'];
+			$parts[] = 'fields=' . implode(', ', $value['fields']);
+			return implode(', ', $parts);
+		}
+
+		return json_encode($value, JSON_UNESCAPED_SLASHES) ?: '';
 	}
 
 	protected function renderDeleteSnapshotForm(string $filename, string $csrf): string {
@@ -3284,14 +3326,14 @@ PHP;
 			$before = $previous[$scope] ?? [];
 			$after = $current[$scope] ?? [];
 			foreach (array_diff(array_keys($after), array_keys($before)) as $name) {
-				$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'added'];
+				$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'added', 'after' => $after[$name] ?? null];
 			}
 			foreach (array_diff(array_keys($before), array_keys($after)) as $name) {
-				$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'removed'];
+				$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'removed', 'before' => $before[$name] ?? null];
 			}
 			foreach (array_intersect(array_keys($before), array_keys($after)) as $name) {
 				if ($before[$name] != $after[$name]) {
-					$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'changed'];
+					$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'changed', 'before' => $before[$name] ?? null, 'after' => $after[$name] ?? null];
 				}
 			}
 		}
@@ -3300,10 +3342,10 @@ PHP;
 			$before = $previous[$scope] ?? [];
 			$after = $current[$scope] ?? [];
 			foreach (array_diff($after, $before) as $name) {
-				$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'added'];
+				$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'added', 'after' => $name];
 			}
 			foreach (array_diff($before, $after) as $name) {
-				$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'removed'];
+				$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'removed', 'before' => $name];
 			}
 		}
 
