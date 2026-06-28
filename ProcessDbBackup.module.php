@@ -1384,6 +1384,7 @@ HTML;
 
 		$canGenerate = !empty(array_filter($diff, fn($item) => $item['type'] === 'added'));
 		if ($canGenerate) {
+			$html .= $this->renderSchemaGenerationPlan($diff);
 			$html .= '
 			<form method="post" action="' . $this->page->url . '" class="uk-margin-small-bottom">
 				' . $csrf . '
@@ -1415,6 +1416,30 @@ HTML;
 		$html .= '</div></div>';
 
 		return $html;
+	}
+
+	protected function renderSchemaGenerationPlan(array $diff): string {
+		$added = array_values(array_filter($diff, fn($item) => ($item['type'] ?? '') === 'added'));
+		if (empty($added)) return '';
+
+		$manual = array_values(array_filter($diff, fn($item) => ($item['type'] ?? '') !== 'added'));
+		$counts = [];
+		foreach ($added as $item) {
+			$scope = (string)($item['scope'] ?? 'schema');
+			$counts[$scope] = ($counts[$scope] ?? 0) + 1;
+		}
+
+		$parts = [];
+		foreach ($counts as $scope => $count) {
+			$parts[] = $count . ' ' . $scope;
+		}
+
+		$message = 'Auto-generation will include added ' . implode(', ', $parts) . '.';
+		if (!empty($manual)) {
+			$message .= ' ' . count($manual) . ' changed/removed item(s) will be added as manual-review comments.';
+		}
+
+		return '<div class="uk-alert uk-alert-primary" uk-alert><p class="uk-margin-remove"><strong>Generation plan.</strong> ' . htmlspecialchars($message) . '</p></div>';
 	}
 
 	protected function renderSchemaBaselineForm(array $snapshots, string $selectedFilename): string {
@@ -3406,7 +3431,7 @@ PHP;
 		$added = array_values(array_filter($diff, fn($item) => $item['type'] === 'added'));
 		$manual = array_values(array_filter($diff, fn($item) => $item['type'] !== 'added'));
 		if (empty($added)) {
-			return ['success' => false, 'error' => 'No added schema items found in latest diff.'];
+			return ['success' => false, 'error' => 'No added schema items found in selected diff.'];
 		}
 
 		$code = $this->buildSchemaDiffMigrationCode($added, $manual, $current, $baseline['filename']);
