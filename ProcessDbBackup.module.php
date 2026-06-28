@@ -1434,7 +1434,7 @@ HTML;
 		$manual = array_values(array_filter($diff, fn($item) => ($item['type'] ?? '') !== 'added'));
 		$counts = [];
 		foreach ($added as $item) {
-			$scope = (string)($item['scope'] ?? 'schema');
+			$scope = $this->formatSchemaDiffScope((string)($item['scope'] ?? 'schema'));
 			$counts[$scope] = ($counts[$scope] ?? 0) + 1;
 		}
 
@@ -1449,6 +1449,13 @@ HTML;
 		}
 
 		return '<div class="uk-alert uk-alert-primary" uk-alert><p class="uk-margin-remove"><strong>Generation plan.</strong> ' . htmlspecialchars($message) . '</p></div>';
+	}
+
+	protected function formatSchemaDiffScope(string $scope): string {
+		return match($scope) {
+			'template_fields' => 'template field assignment(s)',
+			default => $scope,
+		};
 	}
 
 	protected function renderSchemaBaselineForm(array $snapshots, string $selectedFilename): string {
@@ -1515,7 +1522,7 @@ HTML;
 			$details = $this->renderSchemaDiffDetails($item);
 			$html .= '<tr>'
 				. '<td>' . $label . '</td>'
-				. '<td class="uk-text-small"><code>' . htmlspecialchars($item['scope']) . '</code> ' . htmlspecialchars($item['name']) . $details . '</td>'
+				. '<td class="uk-text-small"><code>' . htmlspecialchars($this->formatSchemaDiffScope((string)$item['scope'])) . '</code> ' . htmlspecialchars($this->formatSchemaDiffName($item)) . $details . '</td>'
 				. '</tr>';
 		}
 
@@ -1525,6 +1532,15 @@ HTML;
 		}
 
 		return $html . '</tbody></table>';
+	}
+
+	protected function formatSchemaDiffName(array $item): string {
+		if (($item['scope'] ?? '') === 'template_fields') {
+			$template = (string)($item['template'] ?? '');
+			$field = (string)($item['field'] ?? '');
+			if ($template !== '' && $field !== '') return $field . ' on ' . $template;
+		}
+		return (string)($item['name'] ?? '');
 	}
 
 	protected function renderSchemaDiffDetails(array $item): string {
@@ -1550,6 +1566,13 @@ HTML;
 
 	protected function formatSchemaDiffValue($value): string {
 		if (!is_array($value)) return trim((string)$value);
+
+		if (isset($value['template']) || isset($value['field'])) {
+			$parts = [];
+			if (!empty($value['field'])) $parts[] = 'field=' . $value['field'];
+			if (!empty($value['template'])) $parts[] = 'template=' . $value['template'];
+			return implode(', ', $parts);
+		}
 
 		if (isset($value['type']) || isset($value['label'])) {
 			$parts = [];
@@ -3446,7 +3469,37 @@ PHP;
 				$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'removed', 'before' => $before[$name] ?? null];
 			}
 			foreach (array_intersect(array_keys($before), array_keys($after)) as $name) {
-				if ($before[$name] != $after[$name]) {
+				if ($scope === 'templates') {
+					$beforeFields = $before[$name]['fields'] ?? [];
+					$afterFields = $after[$name]['fields'] ?? [];
+					foreach (array_diff($afterFields, $beforeFields) as $fieldName) {
+						$diff[] = [
+							'scope'    => 'template_fields',
+							'name'     => $name . '.' . $fieldName,
+							'type'     => 'added',
+							'template' => $name,
+							'field'    => $fieldName,
+							'after'    => ['template' => $name, 'field' => $fieldName],
+						];
+					}
+					foreach (array_diff($beforeFields, $afterFields) as $fieldName) {
+						$diff[] = [
+							'scope'    => 'template_fields',
+							'name'     => $name . '.' . $fieldName,
+							'type'     => 'removed',
+							'template' => $name,
+							'field'    => $fieldName,
+							'before'   => ['template' => $name, 'field' => $fieldName],
+						];
+					}
+
+					$beforeComparable = $before[$name];
+					$afterComparable = $after[$name];
+					unset($beforeComparable['fields'], $afterComparable['fields']);
+					if ($beforeComparable != $afterComparable) {
+						$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'changed', 'before' => $before[$name] ?? null, 'after' => $after[$name] ?? null];
+					}
+				} elseif ($before[$name] != $after[$name]) {
 					$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'changed', 'before' => $before[$name] ?? null, 'after' => $after[$name] ?? null];
 				}
 			}
@@ -3511,6 +3564,7 @@ PHP;
 		$body = [];
 		$fieldAdds = array_values(array_filter($added, fn($item) => $item['scope'] === 'fields'));
 		$templateAdds = array_values(array_filter($added, fn($item) => $item['scope'] === 'templates'));
+		$templateFieldAdds = array_values(array_filter($added, fn($item) => $item['scope'] === 'template_fields'));
 		$permissionAdds = array_values(array_filter($added, fn($item) => $item['scope'] === 'permissions'));
 		$roleAdds = array_values(array_filter($added, fn($item) => $item['scope'] === 'roles'));
 
@@ -3530,6 +3584,16 @@ PHP;
 			$body[] = $this->buildCreateTemplateMigrationCode([
 				'template_name'   => $name,
 				'template_fields' => $template['fields'] ?? ['title'],
+			]);
+		}
+
+		foreach ($templateFieldAdds as $item) {
+			$fieldName = (string)($item['field'] ?? '');
+			$templateName = (string)($item['template'] ?? '');
+			if ($fieldName === '' || $templateName === '') continue;
+			$body[] = $this->buildAddFieldToTemplateMigrationCode([
+				'field_name'    => $fieldName,
+				'template_name' => $templateName,
 			]);
 		}
 
