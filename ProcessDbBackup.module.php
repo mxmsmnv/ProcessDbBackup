@@ -1386,7 +1386,7 @@ HTML;
 
 		$html .= $this->renderSchemaBaselineForm($snapshots, $baseline['filename']);
 
-		$canGenerate = !empty(array_filter($diff, fn($item) => $item['type'] === 'added'));
+		$canGenerate = !empty(array_filter($diff, fn($item) => $this->isAutoGeneratableSchemaDiffItem($item)));
 		if ($canGenerate) {
 			$html .= $this->renderSchemaGenerationPlan($diff);
 			$html .= '
@@ -1428,12 +1428,12 @@ HTML;
 	}
 
 	protected function renderSchemaGenerationPlan(array $diff): string {
-		$added = array_values(array_filter($diff, fn($item) => ($item['type'] ?? '') === 'added'));
-		if (empty($added)) return '';
+		$auto = array_values(array_filter($diff, fn($item) => $this->isAutoGeneratableSchemaDiffItem($item)));
+		if (empty($auto)) return '';
 
-		$manual = array_values(array_filter($diff, fn($item) => ($item['type'] ?? '') !== 'added'));
+		$manual = array_values(array_filter($diff, fn($item) => !$this->isAutoGeneratableSchemaDiffItem($item)));
 		$counts = [];
-		foreach ($added as $item) {
+		foreach ($auto as $item) {
 			$scope = $this->formatSchemaDiffScope((string)($item['scope'] ?? 'schema'));
 			$counts[$scope] = ($counts[$scope] ?? 0) + 1;
 		}
@@ -1443,7 +1443,7 @@ HTML;
 			$parts[] = $count . ' ' . $scope;
 		}
 
-		$message = 'Auto-generation will include added ' . implode(', ', $parts) . '.';
+		$message = 'Auto-generation will include ' . implode(', ', $parts) . '.';
 		if (!empty($manual)) {
 			$message .= ' ' . count($manual) . ' changed/removed item(s) will be added as manual-review comments.';
 		}
@@ -1454,8 +1454,17 @@ HTML;
 	protected function formatSchemaDiffScope(string $scope): string {
 		return match($scope) {
 			'template_fields' => 'template field assignment(s)',
+			'field_labels' => 'field label update(s)',
+			'template_labels' => 'template label update(s)',
 			default => $scope,
 		};
+	}
+
+	protected function isAutoGeneratableSchemaDiffItem(array $item): bool {
+		$scope = (string)($item['scope'] ?? '');
+		$type = (string)($item['type'] ?? '');
+		if ($type === 'added') return true;
+		return $type === 'changed' && in_array($scope, ['field_labels', 'template_labels'], true);
 	}
 
 	protected function renderSchemaBaselineForm(array $snapshots, string $selectedFilename): string {
@@ -1494,7 +1503,7 @@ HTML;
 		$addedCount = count(array_filter($diff, fn($item) => ($item['type'] ?? '') === 'added'));
 		$changedCount = count(array_filter($diff, fn($item) => ($item['type'] ?? '') === 'changed'));
 		$removedCount = count(array_filter($diff, fn($item) => ($item['type'] ?? '') === 'removed'));
-		$manualCount = $changedCount + $removedCount;
+		$manualCount = count(array_filter($diff, fn($item) => !$this->isAutoGeneratableSchemaDiffItem($item)));
 
 		$html = '
 		<div class="uk-flex uk-flex-middle uk-flex-wrap uk-margin-small-bottom" style="gap:8px">
@@ -1506,8 +1515,9 @@ HTML;
 		if ($manualCount > 0) {
 			$html .= '<div class="uk-alert uk-alert-warning" uk-alert><p class="uk-margin-remove">Changed and removed schema items are shown for review, but are not auto-generated into migration code because they can be destructive.</p></div>';
 		}
-		if ($addedCount === 0) {
-			$html .= '<div class="uk-alert uk-alert-primary" uk-alert><p class="uk-margin-remove">No added schema items found, so there is nothing safe to auto-generate. Review the changed/removed items manually.</p></div>';
+		$autoCount = count(array_filter($diff, fn($item) => $this->isAutoGeneratableSchemaDiffItem($item)));
+		if ($autoCount === 0) {
+			$html .= '<div class="uk-alert uk-alert-primary" uk-alert><p class="uk-margin-remove">No safe auto-generatable schema changes found. Review the changed/removed items manually.</p></div>';
 		}
 
 		$html .= '<table class="uk-table uk-table-small uk-table-divider uk-table-hover">
@@ -1601,17 +1611,17 @@ HTML;
 
 		$diff = $this->diffSchemaSnapshot($baseline['path']);
 		$current = $this->getCurrentSchemaSnapshot();
-		$added = array_values(array_filter($diff, fn($item) => ($item['type'] ?? '') === 'added'));
-		$manual = array_values(array_filter($diff, fn($item) => ($item['type'] ?? '') !== 'added'));
-		if (empty($added)) {
+		$auto = array_values(array_filter($diff, fn($item) => $this->isAutoGeneratableSchemaDiffItem($item)));
+		$manual = array_values(array_filter($diff, fn($item) => !$this->isAutoGeneratableSchemaDiffItem($item)));
+		if (empty($auto)) {
 			return $this->renderSectionNav('migrations') . $backUrl . '
 			<div class="uk-alert uk-alert-primary" uk-alert>
-				<p class="uk-margin-remove">No added schema items found in selected diff. There is nothing safe to auto-generate.</p>
+				<p class="uk-margin-remove">No safe auto-generatable schema changes found in selected diff.</p>
 			</div>
 			' . $this->renderSchemaDiffSummary($diff, $baseline['filename']);
 		}
 
-		$code = $this->buildSchemaDiffMigrationCode($added, $manual, $current, $baseline['filename']);
+		$code = $this->buildSchemaDiffMigrationCode($auto, $manual, $current, $baseline['filename']);
 		$csrf = $this->session->CSRF->renderInput();
 		$manualAlert = !empty($manual)
 			? '<div class="uk-alert uk-alert-warning" uk-alert><p class="uk-margin-remove">' . count($manual) . ' changed/removed schema item(s) will be included as manual-review comments.</p></div>'
@@ -3286,6 +3296,38 @@ foreach ({$fieldsArray} as \$fieldName) {
 PHP;
 	}
 
+	protected function buildUpdateFieldLabelMigrationCode(array $data): string {
+		$fieldName = var_export($data['field_name'], true);
+		$fieldLabel = var_export($data['field_label'], true);
+
+		return <<<PHP
+\$field = \$fields->get({$fieldName});
+if (!\$field->id) {
+	throw new WireException('Field not found: ' . {$fieldName});
+}
+if ((string)\$field->label !== {$fieldLabel}) {
+	\$field->label = {$fieldLabel};
+	\$fields->save(\$field);
+}
+PHP;
+	}
+
+	protected function buildUpdateTemplateLabelMigrationCode(array $data): string {
+		$templateName = var_export($data['template_name'], true);
+		$templateLabel = var_export($data['template_label'], true);
+
+		return <<<PHP
+\$template = \$templates->get({$templateName});
+if (!\$template->id) {
+	throw new WireException('Template not found: ' . {$templateName});
+}
+if ((string)\$template->label !== {$templateLabel}) {
+	\$template->label = {$templateLabel};
+	\$templates->save(\$template);
+}
+PHP;
+	}
+
 	protected function buildAddFieldToTemplateMigrationCode(array $data): string {
 		$fieldName = var_export($data['field_name'], true);
 		$templateName = var_export($data['template_name'], true);
@@ -3495,12 +3537,39 @@ PHP;
 
 					$beforeComparable = $before[$name];
 					$afterComparable = $after[$name];
-					unset($beforeComparable['fields'], $afterComparable['fields']);
+					if (($beforeComparable['label'] ?? '') !== ($afterComparable['label'] ?? '')) {
+						$diff[] = [
+							'scope'  => 'template_labels',
+							'name'   => $name,
+							'type'   => 'changed',
+							'before' => ['label' => $beforeComparable['label'] ?? ''],
+							'after'  => ['label' => $afterComparable['label'] ?? ''],
+						];
+					}
+					unset($beforeComparable['fields'], $afterComparable['fields'], $beforeComparable['label'], $afterComparable['label']);
 					if ($beforeComparable != $afterComparable) {
 						$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'changed', 'before' => $before[$name] ?? null, 'after' => $after[$name] ?? null];
 					}
 				} elseif ($before[$name] != $after[$name]) {
-					$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'changed', 'before' => $before[$name] ?? null, 'after' => $after[$name] ?? null];
+					if ($scope === 'fields') {
+						$beforeField = $before[$name];
+						$afterField = $after[$name];
+						if (($beforeField['label'] ?? '') !== ($afterField['label'] ?? '')) {
+							$diff[] = [
+								'scope'  => 'field_labels',
+								'name'   => $name,
+								'type'   => 'changed',
+								'before' => ['label' => $beforeField['label'] ?? ''],
+								'after'  => ['label' => $afterField['label'] ?? ''],
+							];
+						}
+						unset($beforeField['label'], $afterField['label']);
+						if ($beforeField != $afterField) {
+							$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'changed', 'before' => $before[$name] ?? null, 'after' => $after[$name] ?? null];
+						}
+					} else {
+						$diff[] = ['scope' => $scope, 'name' => $name, 'type' => 'changed', 'before' => $before[$name] ?? null, 'after' => $after[$name] ?? null];
+					}
 				}
 			}
 		}
@@ -3532,13 +3601,13 @@ PHP;
 
 		$diff = $this->diffSchemaSnapshot($baseline['path']);
 		$current = $this->getCurrentSchemaSnapshot();
-		$added = array_values(array_filter($diff, fn($item) => $item['type'] === 'added'));
-		$manual = array_values(array_filter($diff, fn($item) => $item['type'] !== 'added'));
-		if (empty($added)) {
-			return ['success' => false, 'error' => 'No added schema items found in selected diff.'];
+		$auto = array_values(array_filter($diff, fn($item) => $this->isAutoGeneratableSchemaDiffItem($item)));
+		$manual = array_values(array_filter($diff, fn($item) => !$this->isAutoGeneratableSchemaDiffItem($item)));
+		if (empty($auto)) {
+			return ['success' => false, 'error' => 'No safe auto-generatable schema changes found in selected diff.'];
 		}
 
-		$code = $this->buildSchemaDiffMigrationCode($added, $manual, $current, $baseline['filename']);
+		$code = $this->buildSchemaDiffMigrationCode($auto, $manual, $current, $baseline['filename']);
 		$dir = $this->getMigrationsDir();
 		if (!is_dir($dir) && !wireMkdir($dir, true)) {
 			return ['success' => false, 'error' => 'Cannot create migrations directory.'];
@@ -3565,6 +3634,8 @@ PHP;
 		$fieldAdds = array_values(array_filter($added, fn($item) => $item['scope'] === 'fields'));
 		$templateAdds = array_values(array_filter($added, fn($item) => $item['scope'] === 'templates'));
 		$templateFieldAdds = array_values(array_filter($added, fn($item) => $item['scope'] === 'template_fields'));
+		$fieldLabelUpdates = array_values(array_filter($added, fn($item) => $item['scope'] === 'field_labels'));
+		$templateLabelUpdates = array_values(array_filter($added, fn($item) => $item['scope'] === 'template_labels'));
 		$permissionAdds = array_values(array_filter($added, fn($item) => $item['scope'] === 'permissions'));
 		$roleAdds = array_values(array_filter($added, fn($item) => $item['scope'] === 'roles'));
 
@@ -3594,6 +3665,26 @@ PHP;
 			$body[] = $this->buildAddFieldToTemplateMigrationCode([
 				'field_name'    => $fieldName,
 				'template_name' => $templateName,
+			]);
+		}
+
+		foreach ($fieldLabelUpdates as $item) {
+			$fieldName = (string)($item['name'] ?? '');
+			$fieldLabel = (string)($item['after']['label'] ?? '');
+			if ($fieldName === '') continue;
+			$body[] = $this->buildUpdateFieldLabelMigrationCode([
+				'field_name'  => $fieldName,
+				'field_label' => $fieldLabel,
+			]);
+		}
+
+		foreach ($templateLabelUpdates as $item) {
+			$templateName = (string)($item['name'] ?? '');
+			$templateLabel = (string)($item['after']['label'] ?? '');
+			if ($templateName === '') continue;
+			$body[] = $this->buildUpdateTemplateLabelMigrationCode([
+				'template_name'  => $templateName,
+				'template_label' => $templateLabel,
 			]);
 		}
 
