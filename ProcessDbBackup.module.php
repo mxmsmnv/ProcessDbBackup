@@ -147,6 +147,10 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			return $this->renderMigrationDetails($this->input->get('file'));
 		}
 
+		if ($action === 'preview_schema_diff_migration') {
+			return $this->renderSchemaDiffMigrationPreview($this->input->get('snapshot_file'));
+		}
+
 		return $this->renderDashboard();
 	}
 
@@ -1386,14 +1390,19 @@ HTML;
 		if ($canGenerate) {
 			$html .= $this->renderSchemaGenerationPlan($diff);
 			$html .= '
-			<form method="post" action="' . $this->page->url . '" class="uk-margin-small-bottom">
-				' . $csrf . '
-				<input type="hidden" name="action" value="generate_migration_from_diff">
-				<input type="hidden" name="snapshot_file" value="' . htmlspecialchars($baseline['filename']) . '">
-				<button type="submit" class="uk-button uk-button-primary">
-					<span uk-icon="icon: code; ratio:.7"></span>&nbsp; Generate migration from added schema
-				</button>
-			</form>';
+			<div class="uk-flex uk-flex-middle uk-flex-wrap uk-margin-small-bottom" style="gap:8px">
+				<a href="' . $this->page->url . '?action=preview_schema_diff_migration&snapshot_file=' . rawurlencode($baseline['filename']) . '" class="uk-button uk-button-default">
+					<span uk-icon="icon: search; ratio:.7"></span>&nbsp; Preview generated migration
+				</a>
+				<form method="post" action="' . $this->page->url . '" class="uk-display-inline">
+					' . $csrf . '
+					<input type="hidden" name="action" value="generate_migration_from_diff">
+					<input type="hidden" name="snapshot_file" value="' . htmlspecialchars($baseline['filename']) . '">
+					<button type="submit" class="uk-button uk-button-primary">
+						<span uk-icon="icon: code; ratio:.7"></span>&nbsp; Create migration file
+					</button>
+				</form>
+			</div>';
 		}
 
 		$html .= '
@@ -1557,6 +1566,48 @@ HTML;
 		}
 
 		return json_encode($value, JSON_UNESCAPED_SLASHES) ?: '';
+	}
+
+	protected function renderSchemaDiffMigrationPreview($snapshotFile): string {
+		$filename = basename((string)$snapshotFile);
+		$backUrl = '<p><a href="' . $this->page->url . '?action=migrations' . ($filename ? '&compare_snapshot=' . rawurlencode($filename) : '') . '" class="uk-button uk-button-default"><span uk-icon="icon: arrow-left; ratio:.7"></span>&nbsp; Back to migrations</a></p>';
+		$baseline = $filename !== '' ? $this->getSchemaSnapshotByFilename($filename) : null;
+		if (!$baseline) {
+			return $this->renderSectionNav('migrations') . $backUrl . '<div class="uk-alert uk-alert-danger" uk-alert>Schema snapshot not found.</div>';
+		}
+
+		$diff = $this->diffSchemaSnapshot($baseline['path']);
+		$current = $this->getCurrentSchemaSnapshot();
+		$added = array_values(array_filter($diff, fn($item) => ($item['type'] ?? '') === 'added'));
+		$manual = array_values(array_filter($diff, fn($item) => ($item['type'] ?? '') !== 'added'));
+		if (empty($added)) {
+			return $this->renderSectionNav('migrations') . $backUrl . '
+			<div class="uk-alert uk-alert-primary" uk-alert>
+				<p class="uk-margin-remove">No added schema items found in selected diff. There is nothing safe to auto-generate.</p>
+			</div>
+			' . $this->renderSchemaDiffSummary($diff, $baseline['filename']);
+		}
+
+		$code = $this->buildSchemaDiffMigrationCode($added, $manual, $current, $baseline['filename']);
+		$csrf = $this->session->CSRF->renderInput();
+		$manualAlert = !empty($manual)
+			? '<div class="uk-alert uk-alert-warning" uk-alert><p class="uk-margin-remove">' . count($manual) . ' changed/removed schema item(s) will be included as manual-review comments.</p></div>'
+			: '';
+
+		return $this->renderSectionNav('migrations') . $backUrl . '
+		<h3 class="uk-heading-divider">Schema diff migration preview</h3>
+		<p class="uk-text-small uk-text-muted">Baseline snapshot: <code>' . htmlspecialchars($baseline['filename']) . '</code></p>
+		' . $this->renderSchemaGenerationPlan($diff) . '
+		' . $manualAlert . '
+		<form method="post" action="' . $this->page->url . '" class="uk-margin-small-bottom">
+			' . $csrf . '
+			<input type="hidden" name="action" value="generate_migration_from_diff">
+			<input type="hidden" name="snapshot_file" value="' . htmlspecialchars($baseline['filename']) . '">
+			<button type="submit" class="uk-button uk-button-primary">
+				<span uk-icon="icon: code; ratio:.7"></span>&nbsp; Create migration file
+			</button>
+		</form>
+		<pre class="uk-text-small" style="max-height:70vh;overflow:auto"><code>' . htmlspecialchars($code) . '</code></pre>';
 	}
 
 	protected function renderDeleteSnapshotForm(string $filename, string $csrf): string {
