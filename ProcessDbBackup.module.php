@@ -3250,9 +3250,16 @@ PHP;
 		return <<<PHP
 \$field = \$fields->get({$fieldName});
 if (!\$field->id) {
+	if (!\$modules->isInstalled({$fieldType})) {
+		\$modules->install({$fieldType});
+	}
+	\$fieldtype = \$modules->get({$fieldType});
+	if (!\$fieldtype) {
+		throw new WireException('Fieldtype module not available: ' . {$fieldType});
+	}
 	\$field = new Field();
 	\$field->name = {$fieldName};
-	\$field->type = \$modules->get({$fieldType});
+	\$field->type = \$fieldtype;
 	\$field->label = {$fieldLabel};
 	\$fields->save(\$field);
 } else {
