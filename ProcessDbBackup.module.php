@@ -3293,11 +3293,19 @@ if (!\$template->id) {
 	\$templates->save(\$template);
 }
 
+\$missingFields = [];
 foreach ({$fieldsArray} as \$fieldName) {
 	\$field = \$fields->get(\$fieldName);
-	if (\$field->id && !\$template->fieldgroup->hasField(\$field)) {
+	if (!\$field->id) {
+		\$missingFields[] = \$fieldName;
+		continue;
+	}
+	if (!\$template->fieldgroup->hasField(\$field)) {
 		\$template->fieldgroup->add(\$field);
 	}
+}
+if (!empty(\$missingFields)) {
+	throw new WireException('Template ' . {$templateName} . ' references missing field(s): ' . implode(', ', \$missingFields));
 }
 \$fieldgroups->save(\$template->fieldgroup);
 PHP;
