@@ -3278,6 +3278,17 @@ PHP;
 		$fieldsArray = var_export($data['template_fields'] ?: ['title'], true);
 
 		return <<<PHP
+\$missingFields = [];
+foreach ({$fieldsArray} as \$fieldName) {
+	\$field = \$fields->get(\$fieldName);
+	if (!\$field->id) {
+		\$missingFields[] = \$fieldName;
+	}
+}
+if (!empty(\$missingFields)) {
+	throw new WireException('Template ' . {$templateName} . ' references missing field(s): ' . implode(', ', \$missingFields));
+}
+
 \$template = \$templates->get({$templateName});
 if (!\$template->id) {
 	\$fieldgroup = \$fieldgroups->get({$templateName});
@@ -3293,19 +3304,11 @@ if (!\$template->id) {
 	\$templates->save(\$template);
 }
 
-\$missingFields = [];
 foreach ({$fieldsArray} as \$fieldName) {
 	\$field = \$fields->get(\$fieldName);
-	if (!\$field->id) {
-		\$missingFields[] = \$fieldName;
-		continue;
-	}
 	if (!\$template->fieldgroup->hasField(\$field)) {
 		\$template->fieldgroup->add(\$field);
 	}
-}
-if (!empty(\$missingFields)) {
-	throw new WireException('Template ' . {$templateName} . ' references missing field(s): ' . implode(', ', \$missingFields));
 }
 \$fieldgroups->save(\$template->fieldgroup);
 PHP;
