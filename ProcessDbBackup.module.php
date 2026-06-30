@@ -1622,11 +1622,16 @@ HTML;
 		}
 
 		$code = $this->buildSchemaDiffMigrationCode($auto, $manual, $current, $baseline['filename']);
-		$dependencyCheck = $this->renderSchemaDiffDependencyCheck($auto, $current);
+		$dependencyWarnings = $this->getSchemaDiffDependencyWarnings($auto, $current);
+		$dependencyCheck = $this->renderSchemaDiffDependencyCheck($dependencyWarnings);
 		$csrf = $this->session->CSRF->renderInput();
 		$manualAlert = !empty($manual)
 			? '<div class="uk-alert uk-alert-warning" uk-alert><p class="uk-margin-remove">' . count($manual) . ' changed/removed schema item(s) will be included as manual-review comments.</p></div>'
 			: '';
+		$createButtonClass = empty($dependencyWarnings) ? 'uk-button uk-button-primary' : 'uk-button uk-button-default';
+		$readyNote = empty($dependencyWarnings)
+			? '<p class="uk-text-small uk-text-success">Ready to create. Dependency check passed.</p>'
+			: '<p class="uk-text-small uk-text-warning">Review dependency warnings before creating the migration file.</p>';
 
 		return $this->renderSectionNav('migrations') . $backUrl . '
 		<h3 class="uk-heading-divider">Schema diff migration preview</h3>
@@ -1638,14 +1643,15 @@ HTML;
 			' . $csrf . '
 			<input type="hidden" name="action" value="generate_migration_from_diff">
 			<input type="hidden" name="snapshot_file" value="' . htmlspecialchars($baseline['filename']) . '">
-			<button type="submit" class="uk-button uk-button-primary">
+			<button type="submit" class="' . $createButtonClass . '">
 				<span uk-icon="icon: code; ratio:.7"></span>&nbsp; Create migration file
 			</button>
+			' . $readyNote . '
 		</form>
 		<pre class="uk-text-small" style="max-height:70vh;overflow:auto"><code>' . htmlspecialchars($code) . '</code></pre>';
 	}
 
-	protected function renderSchemaDiffDependencyCheck(array $auto, array $current): string {
+	protected function getSchemaDiffDependencyWarnings(array $auto, array $current): array {
 		$warnings = [];
 
 		foreach ($auto as $item) {
@@ -1679,12 +1685,16 @@ HTML;
 			}
 		}
 
+		return array_values(array_unique($warnings));
+	}
+
+	protected function renderSchemaDiffDependencyCheck(array $warnings): string {
 		if (empty($warnings)) {
 			return '<div class="uk-alert uk-alert-success" uk-alert><p class="uk-margin-remove"><strong>Dependency check passed.</strong> Referenced local fields, templates, and fieldtype modules are available.</p></div>';
 		}
 
 		return '<div class="uk-alert uk-alert-warning" uk-alert><p><strong>Dependency check warnings.</strong></p><ul><li>'
-			. implode('</li><li>', array_unique($warnings))
+			. implode('</li><li>', $warnings)
 			. '</li></ul></div>';
 	}
 
