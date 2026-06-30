@@ -1622,6 +1622,7 @@ HTML;
 		}
 
 		$code = $this->buildSchemaDiffMigrationCode($auto, $manual, $current, $baseline['filename']);
+		$dependencyCheck = $this->renderSchemaDiffDependencyCheck($auto, $current);
 		$csrf = $this->session->CSRF->renderInput();
 		$manualAlert = !empty($manual)
 			? '<div class="uk-alert uk-alert-warning" uk-alert><p class="uk-margin-remove">' . count($manual) . ' changed/removed schema item(s) will be included as manual-review comments.</p></div>'
@@ -1631,6 +1632,7 @@ HTML;
 		<h3 class="uk-heading-divider">Schema diff migration preview</h3>
 		<p class="uk-text-small uk-text-muted">Baseline snapshot: <code>' . htmlspecialchars($baseline['filename']) . '</code></p>
 		' . $this->renderSchemaGenerationPlan($diff) . '
+		' . $dependencyCheck . '
 		' . $manualAlert . '
 		<form method="post" action="' . $this->page->url . '" class="uk-margin-small-bottom">
 			' . $csrf . '
@@ -1641,6 +1643,49 @@ HTML;
 			</button>
 		</form>
 		<pre class="uk-text-small" style="max-height:70vh;overflow:auto"><code>' . htmlspecialchars($code) . '</code></pre>';
+	}
+
+	protected function renderSchemaDiffDependencyCheck(array $auto, array $current): string {
+		$warnings = [];
+
+		foreach ($auto as $item) {
+			$scope = (string)($item['scope'] ?? '');
+			if ($scope === 'fields') {
+				$name = (string)($item['name'] ?? '');
+				$fieldType = (string)($current['fields'][$name]['type'] ?? '');
+				if ($fieldType !== '' && !$this->wire('modules')->isInstalled($fieldType)) {
+					$warnings[] = 'Field <code>' . htmlspecialchars($name) . '</code> uses fieldtype <code>' . htmlspecialchars($fieldType) . '</code>, which is not installed locally.';
+				}
+			}
+
+			if ($scope === 'template_fields') {
+				$fieldName = (string)($item['field'] ?? '');
+				$templateName = (string)($item['template'] ?? '');
+				if ($fieldName !== '' && empty($current['fields'][$fieldName])) {
+					$warnings[] = 'Template assignment references missing field <code>' . htmlspecialchars($fieldName) . '</code>.';
+				}
+				if ($templateName !== '' && empty($current['templates'][$templateName])) {
+					$warnings[] = 'Template assignment references missing template <code>' . htmlspecialchars($templateName) . '</code>.';
+				}
+			}
+
+			if ($scope === 'templates') {
+				$templateName = (string)($item['name'] ?? '');
+				foreach (($current['templates'][$templateName]['fields'] ?? []) as $fieldName) {
+					if (empty($current['fields'][$fieldName])) {
+						$warnings[] = 'Template <code>' . htmlspecialchars($templateName) . '</code> references missing field <code>' . htmlspecialchars($fieldName) . '</code>.';
+					}
+				}
+			}
+		}
+
+		if (empty($warnings)) {
+			return '<div class="uk-alert uk-alert-success" uk-alert><p class="uk-margin-remove"><strong>Dependency check passed.</strong> Referenced local fields, templates, and fieldtype modules are available.</p></div>';
+		}
+
+		return '<div class="uk-alert uk-alert-warning" uk-alert><p><strong>Dependency check warnings.</strong></p><ul><li>'
+			. implode('</li><li>', array_unique($warnings))
+			. '</li></ul></div>';
 	}
 
 	protected function renderDeleteSnapshotForm(string $filename, string $csrf): string {
