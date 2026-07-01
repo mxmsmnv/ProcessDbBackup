@@ -139,6 +139,10 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			return $this->renderMigrationsDashboard();
 		}
 
+		if ($action === 'cli') {
+			return $this->renderCliDashboard();
+		}
+
 		if ($action === 'view_migration') {
 			return $this->renderMigrationPreview($this->input->get('file'));
 		}
@@ -330,6 +334,218 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 	}
 
 	// ── Dashboard render ──────────────────────────────────────────────────────
+
+	public function runCli(array $argv): int {
+		$parsed = $this->parseCliArgs(array_slice($argv, 1));
+		$args = $parsed['args'];
+		$options = $parsed['options'];
+		$command = array_shift($args) ?: 'help';
+
+		try {
+			switch ($command) {
+				case 'help':
+				case '--help':
+				case '-h':
+					$this->cliWrite($this->getCliHelpText());
+					return 0;
+
+				case 'backup:create':
+					$type = (string)($options['type'] ?? 'regular');
+					$result = $this->createBackup($type);
+					if (!$result['success']) return $this->cliError($result['error'] ?? 'Backup failed.');
+					$this->cliWrite('Backup created: ' . ($result['filename'] ?? 'unknown'));
+					return 0;
+
+				case 'migrations:status':
+					return $this->cliMigrationStatus();
+
+				case 'migrations:run':
+					return $this->cliRunMigrations($args, $options);
+
+				case 'schema:snapshot':
+					$result = $this->createSchemaSnapshot();
+					if (!$result['success']) return $this->cliError($result['error'] ?? 'Schema snapshot failed.');
+					$this->cliWrite('Schema snapshot created: ' . ($result['filename'] ?? 'unknown'));
+					return 0;
+
+				case 'schema:diff':
+					return $this->cliSchemaDiff($options, false);
+
+				case 'schema:preview':
+					return $this->cliSchemaDiff($options, true);
+
+				case 'schema:generate':
+					$result = $this->createMigrationFromSchemaDiff((string)($options['baseline'] ?? ''));
+					if (!$result['success']) return $this->cliError($result['error'] ?? 'Migration generation failed.');
+					$this->cliWrite('Migration created: ' . ($result['filename'] ?? 'unknown'));
+					if (!empty($result['manual_count'])) {
+						$this->cliWrite('Manual changes not generated: ' . (int)$result['manual_count']);
+					}
+					return 0;
+			}
+		} catch (\Throwable $e) {
+			return $this->cliError($e->getMessage());
+		}
+
+		return $this->cliError('Unknown command: ' . $command . "\n\n" . $this->getCliHelpText());
+	}
+
+	protected function parseCliArgs(array $args): array {
+		$positionals = [];
+		$options = [];
+
+		foreach ($args as $arg) {
+			$arg = (string)$arg;
+			if (strpos($arg, '--') === 0) {
+				$eq = strpos($arg, '=');
+				if ($eq !== false) {
+					$options[substr($arg, 2, $eq - 2)] = substr($arg, $eq + 1);
+				} else {
+					$options[substr($arg, 2)] = true;
+				}
+				continue;
+			}
+			$positionals[] = $arg;
+		}
+
+		return ['args' => $positionals, 'options' => $options];
+	}
+
+	protected function cliMigrationStatus(): int {
+		$migrations = $this->getMigrationStatusList();
+		$pending = 0;
+		$applied = 0;
+
+		foreach ($migrations as $migration) {
+			if (!empty($migration['applied'])) $applied++;
+			else $pending++;
+		}
+
+		$this->cliWrite("Migrations: {$pending} pending, {$applied} applied");
+		if (empty($migrations)) {
+			$this->cliWrite('No migration files found.');
+			return 0;
+		}
+
+		foreach ($migrations as $migration) {
+			$status = !empty($migration['applied']) ? 'applied' : 'pending';
+			if (!empty($migration['checksum_mismatch'])) $status = 'applied, changed';
+			$lint = !empty($migration['lint_valid']) ? 'php ok' : 'php error';
+			$this->cliWrite(sprintf('%-18s %-12s %s', $status, $lint, $migration['filename']));
+		}
+
+		return 0;
+	}
+
+	protected function cliRunMigrations(array $args, array $options): int {
+		if (empty($options['yes'])) {
+			return $this->cliError('Refusing to run migrations without --yes.');
+		}
+
+		if ($this->isProductionEnvironment()) {
+			$confirm = trim((string)($options['confirm'] ?? ''));
+			if ($confirm !== 'RUN ON PRODUCTION') {
+				return $this->cliError('Production requires --confirm="RUN ON PRODUCTION".');
+			}
+			$this->input->post->set('production_confirm', 'RUN ON PRODUCTION');
+		}
+
+		$targets = [];
+		if (!empty($options['all'])) {
+			foreach ($this->getMigrationStatusList() as $migration) {
+				if (empty($migration['applied'])) $targets[] = $migration['filename'];
+			}
+		} elseif (!empty($args[0])) {
+			$targets[] = basename((string)$args[0]);
+		} else {
+			return $this->cliError('Pass a migration filename or --all.');
+		}
+
+		if (empty($targets)) {
+			$this->cliWrite('No pending migrations.');
+			return 0;
+		}
+
+		foreach ($targets as $filename) {
+			$this->cliWrite('Running migration: ' . $filename);
+			$result = $this->runMigration($filename);
+			if (!$result['success']) return $this->cliError($filename . ': ' . ($result['error'] ?? 'Migration failed.'));
+			$message = trim((string)($result['message'] ?? ''));
+			$this->cliWrite('Applied: ' . $filename . ($message !== '' ? ' - ' . $message : ''));
+		}
+
+		return 0;
+	}
+
+	protected function cliSchemaDiff(array $options, bool $previewCode): int {
+		$baseline = $this->getCliSchemaBaseline((string)($options['baseline'] ?? ''));
+		if (!$baseline) return $this->cliError('No schema snapshot found.');
+
+		$diff = $this->diffSchemaSnapshot($baseline['path']);
+		if (empty($diff)) {
+			$this->cliWrite('No schema changes found against ' . $baseline['filename'] . '.');
+			return 0;
+		}
+
+		$current = $this->getCurrentSchemaSnapshot();
+		$auto = array_values(array_filter($diff, fn($item) => $this->isAutoGeneratableSchemaDiffItem($item)));
+		$manual = array_values(array_filter($diff, fn($item) => !$this->isAutoGeneratableSchemaDiffItem($item)));
+
+		if ($previewCode) {
+			if (empty($auto)) return $this->cliError('No safe auto-generatable schema changes found.');
+			$this->cliWrite($this->buildSchemaDiffMigrationCode($auto, $manual, $current, $baseline['filename']));
+			return 0;
+		}
+
+		$this->cliWrite('Baseline: ' . $baseline['filename']);
+		$this->cliWrite('Changes: ' . count($diff) . ' total, ' . count($auto) . ' auto, ' . count($manual) . ' manual');
+		foreach ($diff as $item) {
+			$kind = $this->isAutoGeneratableSchemaDiffItem($item) ? 'auto' : 'manual';
+			$this->cliWrite(sprintf('%-8s %-16s %-10s %s', $kind, $item['scope'] ?? '', $item['type'] ?? '', $item['name'] ?? ''));
+		}
+
+		return 0;
+	}
+
+	protected function getCliSchemaBaseline(string $filename = ''): ?array {
+		if ($filename !== '') return $this->getSchemaSnapshotByFilename($filename);
+		$snapshots = $this->getSchemaSnapshotFiles();
+		return $snapshots[0] ?? null;
+	}
+
+	protected function cliWrite(string $message = '', bool $stderr = false): void {
+		fwrite($stderr ? STDERR : STDOUT, $message . PHP_EOL);
+	}
+
+	protected function cliError(string $message): int {
+		$this->cliWrite('Error: ' . $message, true);
+		return 1;
+	}
+
+	protected function getCliHelpText(): string {
+		return trim('
+ProcessDbBackup CLI
+
+Usage:
+  php site/modules/ProcessDbBackup/bin/pdb --root=/path/to/processwire <command> [options]
+
+Commands:
+  help                                      Show this help
+  backup:create [--type=regular]            Create a database backup
+  migrations:status                         List migration files and applied state
+  migrations:run <file.php> --yes            Run one pending migration
+  migrations:run --all --yes                Run all pending migrations
+  schema:snapshot                           Save current fields/templates/roles/permissions JSON snapshot
+  schema:diff [--baseline=schema-file.json] Show schema changes against a snapshot
+  schema:preview [--baseline=schema-file.json]
+                                            Print generated migration PHP for safe schema changes
+  schema:generate [--baseline=schema-file.json]
+                                            Create migration file from safe schema changes
+
+Production:
+  migrations:run also requires --confirm="RUN ON PRODUCTION" when the module environment is production.
+');
+	}
 
 	protected function renderDashboard(): string {
 		$allBackups = $this->getBackupList();
@@ -722,12 +938,66 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		$pageUrl = $this->page->url;
 		$backupsActive = $active === 'backups' ? ' class="uk-active"' : '';
 		$migrationsActive = $active === 'migrations' ? ' class="uk-active"' : '';
+		$cliActive = $active === 'cli' ? ' class="uk-active"' : '';
 
 		return "
 		<ul class=\"uk-tab uk-margin-medium-bottom\">
 			<li{$backupsActive}><a href=\"{$pageUrl}\"><span uk-icon=\"icon: database; ratio:.8\"></span>&nbsp; Backups</a></li>
 			<li{$migrationsActive}><a href=\"{$pageUrl}?action=migrations\"><span uk-icon=\"icon: git-branch; ratio:.8\"></span>&nbsp; Migrations</a></li>
+			<li{$cliActive}><a href=\"{$pageUrl}?action=cli\"><span uk-icon=\"icon: terminal; ratio:.8\"></span>&nbsp; CLI</a></li>
 		</ul>";
+	}
+
+	protected function renderCliDashboard(): string {
+		$root = $this->wire('config')->paths->root;
+		$modulePath = $this->wire('config')->paths->siteModules . $this->className() . '/bin/pdb';
+		$displayCommand = 'php ' . $modulePath . ' --root=' . rtrim($root, '/') . ' ';
+		$storage = $this->getRelativeAssetsPath(self::STORAGE_DIR);
+
+		$examples = [
+			'migrations:status' => 'Check what will run before touching the database.',
+			'schema:snapshot' => 'Save current ProcessWire fields, templates, roles, and permissions.',
+			'schema:diff --baseline=schema-2026_07_01_120000.json' => 'Compare the current site structure with a saved snapshot.',
+			'schema:preview --baseline=schema-2026_07_01_120000.json' => 'Print generated migration PHP without creating a file.',
+			'schema:generate --baseline=schema-2026_07_01_120000.json' => 'Create a pending migration from safe schema changes.',
+			'migrations:run --all --yes' => 'Run all pending migrations on a non-production environment.',
+			'migrations:run --all --yes --confirm="RUN ON PRODUCTION"' => 'Run pending migrations when environment is set to production.',
+			'backup:create --type=regular' => 'Create a regular database backup from the terminal.',
+		];
+
+		$rows = '';
+		foreach ($examples as $command => $note) {
+			$rows .= '<tr>'
+				. '<td><code>' . htmlspecialchars($displayCommand . $command) . '</code></td>'
+				. '<td class="uk-text-small uk-text-muted">' . htmlspecialchars($note) . '</td>'
+				. '</tr>';
+		}
+
+		return $this->renderSectionNav('cli') . '
+		<div class="pdb-cli-dashboard">
+			<div class="uk-alert uk-alert-primary" uk-alert>
+				<p class="uk-margin-remove">CLI commands use the same module settings, backup storage, migration table, and <code>' . htmlspecialchars($storage) . '</code> files as the admin UI.</p>
+			</div>
+
+			<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Command</h3>
+			<p class="uk-text-small uk-text-muted">Run commands from the ProcessWire root, or pass <code>--root=/path/to/processwire</code>.</p>
+			<pre class="uk-padding-small uk-background-muted"><code>' . htmlspecialchars($displayCommand . 'help') . '</code></pre>
+
+			<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Examples</h3>
+			<div class="uk-overflow-auto">
+				<table class="uk-table uk-table-small uk-table-divider uk-table-hover">
+					<thead><tr><th>Command</th><th>What it does</th></tr></thead>
+					<tbody>' . $rows . '</tbody>
+				</table>
+			</div>
+
+			<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Notes</h3>
+			<ul class="uk-list uk-list-bullet uk-text-small uk-text-muted">
+				<li><code>schema:snapshot</code>, <code>schema:diff</code>, and <code>schema:generate</code> work with site structure only. They do not store page content or field values.</li>
+				<li><code>migrations:run</code> requires <code>--yes</code>. Production additionally requires <code>--confirm="RUN ON PRODUCTION"</code>.</li>
+				<li>Use <code>schema:preview</code> before <code>schema:generate</code> when you want to inspect the generated PHP first.</li>
+			</ul>
+		</div>';
 	}
 
 	protected function renderMigrationsDashboard(): string {
