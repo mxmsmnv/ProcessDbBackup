@@ -944,7 +944,7 @@ Production:
 		<ul class=\"uk-tab uk-margin-medium-bottom\">
 			<li{$backupsActive}><a href=\"{$pageUrl}\"><span uk-icon=\"icon: database; ratio:.8\"></span>&nbsp; Backups</a></li>
 			<li{$migrationsActive}><a href=\"{$pageUrl}?action=migrations\"><span uk-icon=\"icon: git-branch; ratio:.8\"></span>&nbsp; Migrations</a></li>
-			<li{$cliActive}><a href=\"{$pageUrl}?action=cli\"><span uk-icon=\"icon: terminal; ratio:.8\"></span>&nbsp; CLI</a></li>
+			<li{$cliActive}><a href=\"{$pageUrl}?action=cli\"><span uk-icon=\"icon: code; ratio:.8\"></span>&nbsp; CLI</a></li>
 		</ul>";
 	}
 
