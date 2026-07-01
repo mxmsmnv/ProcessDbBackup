@@ -997,10 +997,40 @@ Production:
 				border-top: 0;
 				padding-top: 0;
 			}
+			.pdb-cli-steps {
+				margin: 0;
+				padding-left: 20px;
+			}
+			.pdb-cli-steps li {
+				margin-bottom: 8px;
+			}
 		</style>
 		<div class="pdb-cli-dashboard">
 			<div class="uk-alert uk-alert-primary" uk-alert>
 				<p class="uk-margin-remove">CLI commands use the same module settings, backup storage, migration table, and <code>' . htmlspecialchars($storage) . '</code> files as the admin UI.</p>
+			</div>
+
+			<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Typical workflow</h3>
+			<div class="uk-grid-small uk-child-width-1-2@m uk-margin-medium-bottom" uk-grid>
+				<div>
+					<h4 class="uk-margin-small-bottom">Local development</h4>
+					<ol class="uk-text-small uk-text-muted pdb-cli-steps">
+						<li>Create a schema snapshot before changing fields or templates.</li>
+						<li>Make your ProcessWire structure changes locally.</li>
+						<li>Run <code>schema:diff</code> to see what changed.</li>
+						<li>Run <code>schema:preview</code>, then <code>schema:generate</code> when the generated PHP looks right.</li>
+						<li>Commit the migration file from <code>site/assets/ProcessDbBackup/migrations/</code>.</li>
+					</ol>
+				</div>
+				<div>
+					<h4 class="uk-margin-small-bottom">Server deployment</h4>
+					<ol class="uk-text-small uk-text-muted pdb-cli-steps">
+						<li>Upload or pull the new migration files to the server.</li>
+						<li>Run <code>migrations:status</code> first. It should show only the migrations you expect.</li>
+						<li>Run <code>migrations:run --all --yes</code> after confirming the list.</li>
+						<li>On production, add <code>--confirm="RUN ON PRODUCTION"</code>.</li>
+					</ol>
+				</div>
 			</div>
 
 			<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Command</h3>
@@ -1044,6 +1074,18 @@ Production:
 			.pdb-migration-tools .uk-form-custom .uk-input {
 				width: 100%;
 			}
+			.pdb-migration-guide {
+				border-top: 1px solid #e5e5e5;
+				border-bottom: 1px solid #e5e5e5;
+				padding: 18px 0;
+			}
+			.pdb-migration-guide ol {
+				margin: 0;
+				padding-left: 20px;
+			}
+			.pdb-migration-guide li {
+				margin-bottom: 8px;
+			}
 		</style>
 		<div class="pdb-migrations-dashboard">
 		<div class="uk-flex uk-flex-between uk-flex-middle uk-flex-wrap uk-margin-medium-bottom pdb-migration-status" style="gap:12px">
@@ -1059,6 +1101,32 @@ Production:
 
 		<div class="uk-alert uk-alert-primary uk-margin-small-bottom" uk-alert>
 			<p class="uk-margin-remove">Migrations are PHP files stored in <code>site/assets/ProcessDbBackup/migrations/</code>. Use them for schema/deployment changes, not for overwriting live content.</p>
+		</div>
+
+		<div class="pdb-migration-guide uk-margin-medium-bottom">
+			<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">How to use migrations</h3>
+			<div class="uk-grid-small uk-child-width-1-2@m" uk-grid>
+				<div>
+					<h4 class="uk-margin-small-bottom">Create a migration</h4>
+					<ol class="uk-text-small uk-text-muted">
+						<li>Before changing fields/templates, create a schema snapshot.</li>
+						<li>Make the schema changes locally in ProcessWire.</li>
+						<li>Use schema diff to review what changed.</li>
+						<li>Create a migration file from safe diff items, or create one manually from the form below.</li>
+						<li>Commit or upload the generated <code>.php</code> file from the migrations folder.</li>
+					</ol>
+				</div>
+				<div>
+					<h4 class="uk-margin-small-bottom">Apply a migration</h4>
+					<ol class="uk-text-small uk-text-muted">
+						<li>Check pending files in the Migration Files table.</li>
+						<li>Open View to inspect the PHP and impact preview.</li>
+						<li>Apply only pending migrations you recognize.</li>
+						<li>Do not use migrations to move live page content or overwrite field values.</li>
+						<li>On production, type <code>RUN ON PRODUCTION</code> before applying.</li>
+					</ol>
+				</div>
+			</div>
 		</div>';
 		if ($this->isProductionEnvironment()) {
 			$html .= '<div class="uk-alert uk-alert-warning" uk-alert><p class="uk-margin-remove"><strong>Production environment.</strong> Running a migration requires typing <code>RUN ON PRODUCTION</code>.</p></div>';
