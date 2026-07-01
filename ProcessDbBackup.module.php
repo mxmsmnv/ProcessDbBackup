@@ -950,8 +950,8 @@ Production:
 
 	protected function renderCliDashboard(): string {
 		$root = $this->wire('config')->paths->root;
-		$modulePath = $this->wire('config')->paths->siteModules . $this->className() . '/bin/pdb';
-		$displayCommand = 'php ' . $modulePath . ' --root=' . rtrim($root, '/') . ' ';
+		$displayCommand = 'php site/modules/' . $this->className() . '/bin/pdb ';
+		$rootCommand = $displayCommand . '--root=' . rtrim($root, '/') . ' ';
 		$storage = $this->getRelativeAssetsPath(self::STORAGE_DIR);
 
 		$examples = [
@@ -965,31 +965,53 @@ Production:
 			'backup:create --type=regular' => 'Create a regular database backup from the terminal.',
 		];
 
-		$rows = '';
+		$exampleCards = '';
 		foreach ($examples as $command => $note) {
-			$rows .= '<tr>'
-				. '<td><code>' . htmlspecialchars($displayCommand . $command) . '</code></td>'
-				. '<td class="uk-text-small uk-text-muted">' . htmlspecialchars($note) . '</td>'
-				. '</tr>';
+			$exampleCards .= '
+				<div class="pdb-cli-example">
+					<code>' . htmlspecialchars($displayCommand . $command) . '</code>
+					<div class="uk-text-small uk-text-muted uk-margin-small-top">' . htmlspecialchars($note) . '</div>
+				</div>';
 		}
 
 		return $this->renderSectionNav('cli') . '
+		<style>
+			.pdb-cli-dashboard code {
+				overflow-wrap: anywhere;
+				white-space: normal;
+			}
+			.pdb-cli-command {
+				margin: 0;
+				overflow-x: auto;
+				white-space: pre;
+			}
+			.pdb-cli-command code {
+				display: block;
+				white-space: pre;
+			}
+			.pdb-cli-example {
+				border-top: 1px solid #e5e5e5;
+				padding: 14px 0;
+			}
+			.pdb-cli-example:first-child {
+				border-top: 0;
+				padding-top: 0;
+			}
+		</style>
 		<div class="pdb-cli-dashboard">
 			<div class="uk-alert uk-alert-primary" uk-alert>
 				<p class="uk-margin-remove">CLI commands use the same module settings, backup storage, migration table, and <code>' . htmlspecialchars($storage) . '</code> files as the admin UI.</p>
 			</div>
 
 			<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Command</h3>
-			<p class="uk-text-small uk-text-muted">Run commands from the ProcessWire root, or pass <code>--root=/path/to/processwire</code>.</p>
-			<pre class="uk-padding-small uk-background-muted"><code>' . htmlspecialchars($displayCommand . 'help') . '</code></pre>
+			<p class="uk-text-small uk-text-muted">From the ProcessWire root:</p>
+			<pre class="uk-padding-small uk-background-muted pdb-cli-command"><code>cd ' . htmlspecialchars(rtrim($root, '/')) . '
+' . htmlspecialchars($displayCommand . 'help') . '</code></pre>
+			<p class="uk-text-small uk-text-muted">From any folder:</p>
+			<pre class="uk-padding-small uk-background-muted pdb-cli-command"><code>' . htmlspecialchars($rootCommand . 'help') . '</code></pre>
 
 			<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Examples</h3>
-			<div class="uk-overflow-auto">
-				<table class="uk-table uk-table-small uk-table-divider uk-table-hover">
-					<thead><tr><th>Command</th><th>What it does</th></tr></thead>
-					<tbody>' . $rows . '</tbody>
-				</table>
-			</div>
+			<div class="uk-card uk-card-default uk-card-small uk-card-body">' . $exampleCards . '</div>
 
 			<h3 class="uk-heading-divider uk-text-small uk-text-uppercase uk-text-muted">Notes</h3>
 			<ul class="uk-list uk-list-bullet uk-text-small uk-text-muted">
