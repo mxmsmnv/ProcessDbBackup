@@ -16,6 +16,7 @@ If this project helps your work, consider supporting future development: [GitHub
 
 - **One-click backup** from the Admin UI with AJAX progress bar
 - **Three backup types** — regular, weekly, monthly — each with independent LazyCron schedule and retention count
+- **Per-environment cron opt-out** — disable scheduled backups from `config-local.php` without changing database-stored module settings
 - **Admin home widget** — shows status, latest backup date and storage for each type, with "Create now" button per type
 - **Backblaze B2** optional cloud upload (API v3) for all backup types
 - **Configurable local copy** — keep or delete local file after B2 upload
@@ -83,6 +84,18 @@ Three independent fieldsets: **Regular**, **Weekly**, **Monthly**.
 `every30Seconds` · `everyMinute` · `every2Minutes` · `every3Minutes` · `every4Minutes` · `every5Minutes` · `every10Minutes` · `every15Minutes` · `every30Minutes` · `every45Minutes` · `everyHour` · `every2Hours` · `every4Hours` · `every6Hours` · `every12Hours` · `everyDay` · `every2Days` · `every4Days` · `everyWeek` · `every2Weeks` · `every4Weeks`
 
 LazyCron fires on the next page load after the interval has elapsed.
+
+### Disable scheduled backups per environment
+
+Scheduled backups can be disabled from a config file that is not stored in the database. This is useful for local/staging copies that are refreshed from production, because module schedule settings are cloned with the database.
+
+Add this to `site/config-local.php` or another environment-specific config file:
+
+```php
+$config->processDbBackupDisableCron = true;
+```
+
+When enabled, ProcessDbBackup does not register its LazyCron hooks for regular, weekly, or monthly backups. Manual backup, restore, upload, and migration tools remain available.
 
 ### Backblaze B2
 

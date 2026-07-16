@@ -56,17 +56,19 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 	public function init(): void {
 		parent::init();
 
-		// Regular schedule
-		if ($this->cron_interval && $this->cron_interval !== 'never') {
-			$this->addHook('LazyCron::' . $this->cron_interval, $this, 'cronBackup');
-		}
-		// Weekly schedule
-		if ($this->cron_weekly && $this->cron_weekly !== 'never') {
-			$this->addHook('LazyCron::' . $this->cron_weekly, $this, 'cronBackupWeekly');
-		}
-		// Monthly schedule
-		if ($this->cron_monthly && $this->cron_monthly !== 'never') {
-			$this->addHook('LazyCron::' . $this->cron_monthly, $this, 'cronBackupMonthly');
+		if (!$this->isCronDisabledByConfig()) {
+			// Regular schedule
+			if ($this->cron_interval && $this->cron_interval !== 'never') {
+				$this->addHook('LazyCron::' . $this->cron_interval, $this, 'cronBackup');
+			}
+			// Weekly schedule
+			if ($this->cron_weekly && $this->cron_weekly !== 'never') {
+				$this->addHook('LazyCron::' . $this->cron_weekly, $this, 'cronBackupWeekly');
+			}
+			// Monthly schedule
+			if ($this->cron_monthly && $this->cron_monthly !== 'never') {
+				$this->addHook('LazyCron::' . $this->cron_monthly, $this, 'cronBackupMonthly');
+			}
 		}
 
 		// Dashboard widget on PW admin home
@@ -78,6 +80,10 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			$this->migrateMeta();
 			$this->ensureMigrationStore();
 		}
+	}
+
+	protected function isCronDisabledByConfig(): bool {
+		return (bool)$this->wire('config')->processDbBackupDisableCron;
 	}
 
 	// ── Admin UI entry point ──────────────────────────────────────────────────
@@ -601,7 +607,8 @@ Production:
 		];
 		$cronInterval = $this->cron_interval ?: 'never';
 		$retentionCount = (int)($this->retention_count ?: 0);
-		$cronLabel  = $cronLabels[$cronInterval] ?? 'manual only';
+		$cronDisabled = $this->isCronDisabledByConfig();
+		$cronLabel  = $cronDisabled ? 'disabled by config' : ($cronLabels[$cronInterval] ?? 'manual only');
 		$retention  = $retentionCount > 0 ? $retentionCount : '&infin;';
 		$b2Tag      = $this->b2_enabled ? "<span class=\"uk-badge uk-margin-small-left\">B2</span>" : '';
 
@@ -629,6 +636,13 @@ Production:
 				<div class=\"uk-text-small uk-text-muted uk-text-uppercase\">Schedule</div>
 			</div></div>
 		</div>";
+
+		if ($cronDisabled) {
+			$html .= '
+			<div class="uk-alert uk-alert-primary" uk-alert>
+				<p class="uk-margin-remove">Scheduled backups are disabled by <code>$config->processDbBackupDisableCron = true;</code>. Manual backup, restore, upload, and migration tools remain available.</p>
+			</div>';
+		}
 
 		// ── Create buttons ────────────────────────────────────────────────────
 		$weeklyEnabled  = $this->cron_weekly  && $this->cron_weekly  !== 'never';
@@ -4453,14 +4467,16 @@ PHP;
 			'every4Weeks' => 'Every 4w',
 		];
 
+		$cronDisabled = $this->isCronDisabledByConfig();
+
 		// Build per-type rows
 		$rows = '';
 		foreach ($typeConfig as $type => $cfg) {
 			$backupsOfType = $byType[$type];
 			$latest        = $backupsOfType[0] ?? null;
 			$count         = count($backupsOfType);
-			$scheduleLabel = $cronLabels[$cfg['schedule']] ?? $cfg['schedule'];
-			$isScheduled   = $cfg['schedule'] !== 'never';
+			$scheduleLabel = $cronDisabled ? 'Disabled by config' : ($cronLabels[$cfg['schedule']] ?? $cfg['schedule']);
+			$isScheduled   = !$cronDisabled && $cfg['schedule'] !== 'never';
 
 			// Status
 			if (!$latest) {
@@ -4500,7 +4516,7 @@ PHP;
 
 			$schedBadge = $isScheduled
 				? '<span class="uk-label uk-label-success" style="font-size:10px">' . $scheduleLabel . '</span>'
-				: '<span class="uk-label" style="font-size:10px;background:#aaa">Not scheduled</span>';
+				: '<span class="uk-label" style="font-size:10px;background:#aaa">' . $scheduleLabel . '</span>';
 
 			$rows .= '
 			<tr>
