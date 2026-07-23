@@ -7,7 +7,7 @@
  * Supports local storage and Backblaze B2, manual and scheduled backups via LazyCron.
  *
  * @author Maxim Semenov <maxim@smnv.org> (smnv.org)
- * @version 2.1.2
+ * @version 2.1.3
  * @license MIT
  */
 class ProcessDbBackup extends Process implements Module, ConfigurableModule {
@@ -16,7 +16,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		return [
 			'title'    => 'DB Backup',
 			'summary'  => 'Database backup and restore with local and Backblaze B2 storage, backup types (regular/weekly/monthly), chunked upload, streaming restore.',
-			'version'  => 212,
+			'version'  => 213,
 			'author'   => 'Maxim Semenov',
 			'href'     => 'https://smnv.org',
 			'icon'     => 'database',
@@ -770,9 +770,6 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 					$pdo->setAttribute($bufferedQueryAttr, false);
 				}
 				$stmt = $pdo->query("SELECT * FROM {$escapedTable}");
-				if ($bufferedQueryAttr !== null) {
-					$pdo->setAttribute($bufferedQueryAttr, true);
-				}
 				$firstRow  = true;
 				$batchVals = [];
 				$batchSize = 100;
@@ -797,6 +794,10 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				} elseif (!$firstRow) {
 					gzwrite($fh, "\n");
 				}
+				$stmt->closeCursor();
+				if ($bufferedQueryAttr !== null) {
+					$pdo->setAttribute($bufferedQueryAttr, true);
+				}
 			}
 
 			gzwrite($fh, "SET FOREIGN_KEY_CHECKS=1;\n");
@@ -807,10 +808,10 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		} catch (\Exception $e) {
 			// Re-enable buffered queries if exception during unbuffered fetch
 			try {
+				if (isset($stmt)) $stmt->closeCursor();
 				if (isset($bufferedQueryAttr) && $bufferedQueryAttr !== null && isset($pdo)) {
 					$pdo->setAttribute($bufferedQueryAttr, true);
 				}
-				if (isset($stmt)) $stmt->closeCursor();
 			} catch (\Throwable $ignored) {}
 			if (isset($fh) && $fh) gzclose($fh);
 			return ['success' => false, 'error' => 'PDO dump error: ' . $e->getMessage()];

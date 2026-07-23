@@ -2,6 +2,11 @@
 
 All notable changes to ProcessDbBackup are documented in this file.
 
+## 2.1.3 — 2026-07-23
+
+- Fixed PDO fallback dumps by keeping unbuffered mode active until the result cursor is fully consumed and closed
+- Ensured the result cursor is closed before buffered-query mode is restored after an exception
+
 ## 2.1.2 — 2026-06-07
 
 - Fixed a first-run deprecation warning when schedule settings have not been saved yet
