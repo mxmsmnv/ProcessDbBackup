@@ -1287,7 +1287,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			if (!file_exists($cf)) {
 				fclose($out);
 				unlink($finalPath);
-				$this->ajaxJson(['success' => false, 'error' => "Missing chunk {$i}."]); 
+				$this->ajaxJson(['success' => false, 'error' => "Missing chunk {$i}."]);
 			}
 			$in = fopen($cf, 'rb');
 			while (!feof($in)) fwrite($out, fread($in, 65536));
