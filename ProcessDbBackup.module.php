@@ -7,7 +7,7 @@
  * Supports local storage and Backblaze B2, manual and scheduled backups via LazyCron.
  *
  * @author Maxim Semenov <maxim@smnv.org> (smnv.org)
- * @version 2.2.0
+ * @version 2.2.1
  * @license MIT
  */
 class ProcessDbBackup extends Process implements Module, ConfigurableModule {
@@ -16,7 +16,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		return [
 			'title'    => 'DB Backup',
 			'summary'  => 'Database backup and restore with local and Backblaze B2 storage, backup types (regular/weekly/monthly), chunked upload, streaming restore.',
-			'version'  => 220,
+			'version'  => 221,
 			'author'   => 'Maxim Semenov',
 			'href'     => 'https://smnv.org',
 			'icon'     => 'database',
@@ -529,11 +529,12 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 	}
 
 	protected function getCliHelpText(): string {
-		return trim('
+		$displayCommand = trim($this->getCliDisplayCommand());
+		return trim("
 ProcessDbBackup CLI
 
 Usage:
-  php site/modules/ProcessDbBackup/bin/pdb --root=/path/to/processwire <command> [options]
+  {$displayCommand} --root=/path/to/processwire <command> [options]
 
 Commands:
   help                                      Show this help
@@ -549,8 +550,8 @@ Commands:
                                             Create migration file from safe schema changes
 
 Production:
-  migrations:run also requires --confirm="RUN ON PRODUCTION" when the module environment is production.
-');
+  migrations:run also requires --confirm=\"RUN ON PRODUCTION\" when the module environment is production.
+");
 	}
 
 	protected function renderDashboard(): string {
@@ -964,8 +965,8 @@ Production:
 
 	protected function renderCliDashboard(): string {
 		$root = $this->wire('config')->paths->root;
-		$displayCommand = 'php site/modules/' . $this->className() . '/bin/pdb ';
-		$rootCommand = $displayCommand . '--root=' . rtrim($root, '/') . ' ';
+		$displayCommand = $this->getCliDisplayCommand();
+		$rootCommand = $displayCommand . '--root=' . escapeshellarg(rtrim($root, '/')) . ' ';
 		$storage = $this->getRelativeAssetsPath(self::STORAGE_DIR);
 
 		$examples = [
@@ -1064,6 +1065,18 @@ Production:
 				<li>Use <code>schema:preview</code> before <code>schema:generate</code> when you want to inspect the generated PHP first.</li>
 			</ul>
 		</div>';
+	}
+
+	protected function getCliDisplayCommand(): string {
+		$moduleFile = (string)$this->wire('modules')->getModuleFile($this->className());
+		$script = dirname($moduleFile) . '/bin/pdb';
+		$root = (string)$this->wire('config')->paths->root;
+
+		if ($root !== '' && str_starts_with($script, $root)) {
+			$script = ltrim(substr($script, strlen($root)), '/\\');
+		}
+
+		return 'php ' . escapeshellarg($script) . ' ';
 	}
 
 	protected function renderMigrationsDashboard(): string {

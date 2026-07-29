@@ -2,6 +2,11 @@
 
 All notable changes to ProcessDbBackup are documented in this file.
 
+## 2.2.1 — 2026-07-29
+
+- Resolve the CLI script path from the installed module file so commands work
+  when ProcessDbBackup is nested inside a module package
+
 ## 2.2.0 — 2026-06-21
 
 - Moved runtime migration and schema snapshot storage to `site/assets/ProcessDbBackup/` so generated files survive module updates
