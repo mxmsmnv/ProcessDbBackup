@@ -7,7 +7,7 @@
  * Supports local storage and Backblaze B2, manual and scheduled backups via LazyCron.
  *
  * @author Maxim Semenov <maxim@smnv.org> (smnv.org)
- * @version 2.1.3
+ * @version 2.1.4
  * @license MIT
  */
 class ProcessDbBackup extends Process implements Module, ConfigurableModule {
@@ -16,7 +16,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		return [
 			'title'    => 'DB Backup',
 			'summary'  => 'Database backup and restore with local and Backblaze B2 storage, backup types (regular/weekly/monthly), chunked upload, streaming restore.',
-			'version'  => 213,
+			'version'  => 214,
 			'author'   => 'Maxim Semenov',
 			'href'     => 'https://smnv.org',
 			'icon'     => 'database',
@@ -51,17 +51,19 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 	public function init(): void {
 		parent::init();
 
-		// Regular schedule
-		if ($this->cron_interval && $this->cron_interval !== 'never') {
-			$this->addHook('LazyCron::' . $this->cron_interval, $this, 'cronBackup');
-		}
-		// Weekly schedule
-		if ($this->cron_weekly && $this->cron_weekly !== 'never') {
-			$this->addHook('LazyCron::' . $this->cron_weekly, $this, 'cronBackupWeekly');
-		}
-		// Monthly schedule
-		if ($this->cron_monthly && $this->cron_monthly !== 'never') {
-			$this->addHook('LazyCron::' . $this->cron_monthly, $this, 'cronBackupMonthly');
+		if ($this->shouldRegisterLazyCronHooks()) {
+			// Regular schedule
+			if ($this->cron_interval && $this->cron_interval !== 'never') {
+				$this->addHook('LazyCron::' . $this->cron_interval, $this, 'cronBackup');
+			}
+			// Weekly schedule
+			if ($this->cron_weekly && $this->cron_weekly !== 'never') {
+				$this->addHook('LazyCron::' . $this->cron_weekly, $this, 'cronBackupWeekly');
+			}
+			// Monthly schedule
+			if ($this->cron_monthly && $this->cron_monthly !== 'never') {
+				$this->addHook('LazyCron::' . $this->cron_monthly, $this, 'cronBackupMonthly');
+			}
 		}
 
 		// Dashboard widget on PW admin home
@@ -71,6 +73,20 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		if ($this->wire('page') && $this->wire('page')->template == 'admin') {
 			$this->migrateMeta();
 		}
+	}
+
+	/**
+	 * LazyCron runs after a normal page view and therefore keeps the visitor's
+	 * request open while a potentially large dump is written. Existing module
+	 * installations retain the legacy behaviour until the new setting is saved.
+	 */
+	protected function shouldRegisterLazyCronHooks(): bool {
+		if (PHP_SAPI === 'cli' || PHP_SAPI === 'phpdbg') return false;
+
+		$config = $this->wire('modules')->getConfig($this);
+		if (!array_key_exists('allow_web_lazycron', $config)) return true;
+
+		return !empty($config['allow_web_lazycron']);
 	}
 
 	// ── Admin UI entry point ──────────────────────────────────────────────────
@@ -2236,6 +2252,15 @@ HTML;
 		$wrapper->add($f);
 
 		// ── Cron interval ──────────────────────────────────────────────────────
+		$f = $modules->get('InputfieldCheckbox');
+		$f->attr('name', 'allow_web_lazycron');
+		$f->label = 'Run scheduled backups after frontend page views';
+		$f->description = 'Legacy compatibility only. Disable this on large sites and run bin/process-db-backup.php from cron, launchd, or a queue worker instead.';
+		$f->attr('checked', array_key_exists('allow_web_lazycron', $data) ? !empty($data['allow_web_lazycron']) : true);
+		$f->attr('value', 1);
+		$f->columnWidth = 100;
+		$wrapper->add($f);
+
 		$f = $modules->get('InputfieldSelect');
 		$f->attr('name', 'cron_interval');
 		$f->label = 'Auto-backup schedule (LazyCron)';

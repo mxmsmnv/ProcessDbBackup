@@ -2,6 +2,12 @@
 
 All notable changes to ProcessDbBackup are documented in this file.
 
+## 2.1.4 — 2026-07-31
+
+- Added an opt-out for frontend LazyCron backup hooks so large dumps do not block visitor requests
+- Added a bounded CLI entry point for regular, weekly, and monthly backups
+- Preserved the previous LazyCron behaviour for existing installations until the new setting is explicitly saved
+
 ## 2.1.3 — 2026-07-23
 
 - Fixed PDO fallback dumps by keeping unbuffered mode active until the result cursor is fully consumed and closed
