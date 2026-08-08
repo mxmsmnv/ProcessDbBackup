@@ -7,7 +7,7 @@
  * Supports local storage and Backblaze B2, manual and scheduled backups via LazyCron.
  *
  * @author Maxim Semenov <maxim@smnv.org> (smnv.org)
- * @version 2.1.4
+ * @version 2.1.5
  * @license MIT
  */
 class ProcessDbBackup extends Process implements Module, ConfigurableModule {
@@ -16,7 +16,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		return [
 			'title'    => 'DB Backup',
 			'summary'  => 'Database backup and restore with local and Backblaze B2 storage, backup types (regular/weekly/monthly), chunked upload, streaming restore.',
-			'version'  => 214,
+			'version'  => 215,
 			'author'   => 'Maxim Semenov',
 			'href'     => 'https://smnv.org',
 			'icon'     => 'database',
@@ -40,11 +40,30 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 
 	const BACKUP_DIR     = 'backups/db/';
 	const BACKUP_EXT     = '.sql.gz';
-	const META_FILE      = 'backups/db/.meta.json';
-	const LOCK_FILE      = 'backups/db/.lock'; // base, type appended at runtime
-	const CHUNK_DIR      = 'backups/db/.chunks/';
 	const LOG_NAME       = 'db-backup';
 	const B2_API_AUTH    = 'https://api.backblazeb2.com/b2api/v3/b2_authorize_account';
+
+	/**
+	 * Return the configured backup directory.
+	 *
+	 * Sites using nginx or another server that does not enforce .htaccess should
+	 * set $config->processDbBackupPath to an absolute path outside document root.
+	 */
+	protected function backupDir(): string {
+		$config = $this->wire('config');
+		$custom = trim((string) $config->get('processDbBackupPath'));
+		$dir = $custom !== '' ? $custom : $config->paths->assets . self::BACKUP_DIR;
+
+		if ($custom !== '' && !str_starts_with($custom, DIRECTORY_SEPARATOR)) {
+			throw new WireException('processDbBackupPath must be an absolute path.');
+		}
+
+		return rtrim($dir, '/\\') . DIRECTORY_SEPARATOR;
+	}
+
+	protected function backupPath(string $relative = ''): string {
+		return $this->backupDir() . ltrim($relative, '/\\');
+	}
 
 	// ── Init ──────────────────────────────────────────────────────────────────
 
@@ -218,7 +237,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				$meta  = $this->getMeta();
 				if (isset($meta[$file])) {
 					$meta[$file]['label'] = $label;
-					$metaPath = $this->wire('config')->paths->assets . self::META_FILE;
+					$metaPath = $this->backupPath('.meta.json');
 					file_put_contents($metaPath, json_encode($meta, JSON_PRETTY_PRINT), LOCK_EX);
 					$this->message('Label saved.');
 				}
@@ -618,13 +637,13 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 	// ── Create backup ─────────────────────────────────────────────────────────
 
 	public function createBackup(string $type = 'regular'): array {
-		$dir = $this->wire('config')->paths->assets . self::BACKUP_DIR;
+		$dir = $this->backupDir();
 		if (!is_dir($dir) && !wireMkdir($dir, true)) {
 			return ['success' => false, 'error' => 'Cannot create backup directory.'];
 		}
 
 		// Lock file — prevent concurrent backups
-		$lockFile = $this->wire('config')->paths->assets . dirname(self::LOCK_FILE) . '/db-' . $type . '.lock';
+		$lockFile = $this->backupPath('db-' . $type . '.lock');
 		if (file_exists($lockFile)) {
 			$lockAge = time() - (int)file_get_contents($lockFile);
 			if ($lockAge < 3600) {
@@ -837,7 +856,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 	// ── Restore ───────────────────────────────────────────────────────────────
 
 	public function restoreBackup(string $filename): array {
-		$filepath = $this->wire('config')->paths->assets . self::BACKUP_DIR . $filename;
+		$filepath = $this->backupPath($filename);
 
 		if (!file_exists($filepath)) {
 			return ['success' => false, 'error' => 'Backup file not found.'];
@@ -1040,7 +1059,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 	// ── List tables inside a backup ───────────────────────────────────────────
 
 	public function getBackupTables(string $filename): array {
-		$filepath = $this->wire('config')->paths->assets . self::BACKUP_DIR . $filename;
+		$filepath = $this->backupPath($filename);
 		if (!file_exists($filepath)) return [];
 
 		$tables = [];
@@ -1068,7 +1087,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 	// ── Partial restore ───────────────────────────────────────────────────────
 
 	public function partialRestoreBackup(string $filename, array $tables): array {
-		$filepath = $this->wire('config')->paths->assets . self::BACKUP_DIR . $filename;
+		$filepath = $this->backupPath($filename);
 
 		if (!file_exists($filepath)) {
 			return ['success' => false, 'error' => 'Backup file not found.'];
@@ -1168,7 +1187,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			return ['success' => false, 'error' => 'Invalid filename.'];
 		}
 
-		$filepath = $this->wire('config')->paths->assets . self::BACKUP_DIR . $filename;
+		$filepath = $this->backupPath($filename);
 
 		if (file_exists($filepath)) {
 			unlink($filepath);
@@ -1234,7 +1253,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		$ok    = false;
 		if (isset($meta[$file])) {
 			$meta[$file]['label'] = $label;
-			$metaPath = $this->wire('config')->paths->assets . self::META_FILE;
+			$metaPath = $this->backupPath('.meta.json');
 			file_put_contents($metaPath, json_encode($meta, JSON_PRETTY_PRINT), LOCK_EX);
 			$ok = true;
 		}
@@ -1256,7 +1275,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			$this->ajaxJson(['success' => false, 'error' => 'CSRF token invalid.']);
 		}
 
-		$chunkDir = $this->wire('config')->paths->assets . self::CHUNK_DIR;
+		$chunkDir = $this->backupPath('.chunks/');
 		if (!is_dir($chunkDir)) wireMkdir($chunkDir, true);
 
 		$uploadId  = preg_replace('/[^a-f0-9]/', '', $this->input->post('upload_id') ?? '');
@@ -1285,7 +1304,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			? $origName
 			: 'db-uploaded-' . date('Y-m-d_His') . self::BACKUP_EXT;
 
-		$backupDir = $this->wire('config')->paths->assets . self::BACKUP_DIR;
+		$backupDir = $this->backupDir();
 		if (!is_dir($backupDir)) wireMkdir($backupDir, true);
 		$finalPath = $backupDir . $filename;
 
@@ -1383,7 +1402,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			? $origName
 			: 'db-uploaded-' . date('Y-m-d_His') . '.sql.gz';
 
-		$dir = $this->wire('config')->paths->assets . self::BACKUP_DIR;
+		$dir = $this->backupDir();
 		if (!is_dir($dir) && !wireMkdir($dir, true)) {
 			return ['success' => false, 'error' => 'Cannot create backup directory.'];
 		}
@@ -1429,7 +1448,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			return;
 		}
 
-		$filepath = $this->wire('config')->paths->assets . self::BACKUP_DIR . $filename;
+		$filepath = $this->backupPath($filename);
 
 		if (!file_exists($filepath)) {
 			$this->error('File not found.');
@@ -1476,7 +1495,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		if (!$result['success']) {
 			$this->log()->save(self::LOG_NAME, 'Cron backup (regular) failed: ' . $result['error']);
 			// Release stale lock if backup failed
-			$lockFile = $this->wire('config')->paths->assets . dirname(self::LOCK_FILE) . '/db-regular.lock';
+			$lockFile = $this->backupPath('db-regular.lock');
 			if (file_exists($lockFile)) unlink($lockFile);
 		}
 	}
@@ -1485,7 +1504,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		$result = $this->createBackup('weekly');
 		if (!$result['success']) {
 			$this->log()->save(self::LOG_NAME, 'Cron backup (weekly) failed: ' . $result['error']);
-			$lockFile = $this->wire('config')->paths->assets . dirname(self::LOCK_FILE) . '/db-weekly.lock';
+			$lockFile = $this->backupPath('db-weekly.lock');
 			if (file_exists($lockFile)) unlink($lockFile);
 		}
 	}
@@ -1494,7 +1513,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		$result = $this->createBackup('monthly');
 		if (!$result['success']) {
 			$this->log()->save(self::LOG_NAME, 'Cron backup (monthly) failed: ' . $result['error']);
-			$lockFile = $this->wire('config')->paths->assets . dirname(self::LOCK_FILE) . '/db-monthly.lock';
+			$lockFile = $this->backupPath('db-monthly.lock');
 			if (file_exists($lockFile)) unlink($lockFile);
 		}
 	}
@@ -1503,7 +1522,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 
 	protected function getBackupList(): array {
 		$meta = $this->getMeta();
-		$dir  = $this->wire('config')->paths->assets . self::BACKUP_DIR;
+		$dir  = $this->backupDir();
 		$list = [];
 
 		foreach ($meta as $filename => $m) {
@@ -1533,7 +1552,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		// Sum sizes from meta, excluding orphaned entries (no local file, no B2)
 		$meta = $this->getMeta();
 		if ($meta) {
-			$dir   = $this->wire('config')->paths->assets . self::BACKUP_DIR;
+			$dir   = $this->backupDir();
 			$total = 0;
 			foreach ($meta as $filename => $m) {
 				if (!empty($m['b2']) || file_exists($dir . $filename)) {
@@ -1542,7 +1561,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			}
 			return $this->formatBytes($total);
 		}
-		$dir   = $this->wire('config')->paths->assets . self::BACKUP_DIR;
+		$dir   = $this->backupDir();
 		if (!is_dir($dir)) return '0 B';
 		$files = glob($dir . 'db-*' . self::BACKUP_EXT) ?: [];
 		$total = array_sum(array_map('filesize', $files));
@@ -1595,7 +1614,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 		// Skip if already migrated (tracked in module data to avoid reading file every admin load)
 		if ($this->wire('modules')->getConfig($this, 'meta_migrated')) return;
 
-		$path = $this->wire('config')->paths->assets . self::META_FILE;
+		$path = $this->backupPath('.meta.json');
 		if (!file_exists($path)) {
 			$this->wire('modules')->saveConfig($this, 'meta_migrated', true);
 			return;
@@ -1624,7 +1643,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 				$changed = true;
 			}
 			if (!isset($m['local'])) {
-				$dir = $this->wire('config')->paths->assets . self::BACKUP_DIR;
+				$dir = $this->backupDir();
 				$m['local'] = file_exists($dir . $filename);
 				$changed = true;
 			}
@@ -1643,7 +1662,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 	// ── Meta store ────────────────────────────────────────────────────────────
 
 	protected function getMeta(): array {
-		$path = $this->wire('config')->paths->assets . self::META_FILE;
+		$path = $this->backupPath('.meta.json');
 		if (!file_exists($path)) return [];
 		// Use shared lock to prevent reading partial writes
 		$fh = fopen($path, 'r');
@@ -1658,14 +1677,14 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 	protected function saveMeta(string $filename, array $data): void {
 		$meta = $this->getMeta();
 		$meta[$filename] = $data;
-		$path = $this->wire('config')->paths->assets . self::META_FILE;
+		$path = $this->backupPath('.meta.json');
 		file_put_contents($path, json_encode($meta, JSON_PRETTY_PRINT), LOCK_EX);
 	}
 
 	protected function removeMeta(string $filename): void {
 		$meta = $this->getMeta();
 		unset($meta[$filename]);
-		$path = $this->wire('config')->paths->assets . self::META_FILE;
+		$path = $this->backupPath('.meta.json');
 		file_put_contents($path, json_encode($meta, JSON_PRETTY_PRINT), LOCK_EX);
 	}
 
@@ -1954,7 +1973,7 @@ class ProcessDbBackup extends Process implements Module, ConfigurableModule {
 			return '';
 		}
 
-		$filepath = $this->wire('config')->paths->assets . self::BACKUP_DIR . $filename;
+		$filepath = $this->backupPath($filename);
 		$result   = $this->verifyBackup($filepath);
 
 		$this->headline('Verify: ' . $filename);
@@ -2403,14 +2422,15 @@ HTML;
 	public function ___install(): void {
 		parent::___install();
 
-		$dir = $this->wire('config')->paths->assets . self::BACKUP_DIR;
+		$dir = $this->backupDir();
 		if (!is_dir($dir)) wireMkdir($dir, true);
 
-		// .htaccess protection for local backups
-		$htaccess = dirname($dir) . '/.htaccess';
-		if (!file_exists($htaccess)) {
+		// .htaccess is only relevant for the legacy web-root default.
+		$defaultDir = $this->wire('config')->paths->assets . self::BACKUP_DIR;
+		$htaccess = dirname($defaultDir) . '/.htaccess';
+		if ($dir === $defaultDir && !file_exists($htaccess)) {
 			file_put_contents(
-				$this->wire('config')->paths->assets . 'backups/.htaccess',
+				$htaccess,
 				"Order Deny,Allow\nDeny from all\n"
 			);
 		}

@@ -11,7 +11,7 @@ if ($module === false || $cli === false) {
 }
 
 $expectations = [
-	[$module, "'version'  => 214"],
+	[$module, "'version'  => 215"],
 	[$module, 'shouldRegisterLazyCronHooks()'],
 	[$module, "array_key_exists('allow_web_lazycron', \$config)"],
 	[$module, "PHP_SAPI === 'cli'"],

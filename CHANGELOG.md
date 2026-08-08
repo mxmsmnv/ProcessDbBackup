@@ -2,6 +2,12 @@
 
 All notable changes to ProcessDbBackup are documented in this file.
 
+## 2.1.5 — 2026-08-08
+
+- Added `processDbBackupPath` support for absolute backup storage outside the public document root
+- Centralized local backup, metadata, lock, chunk, restore, and retention paths on the configured private directory
+- Kept the legacy `site/assets/backups/db/` default for compatibility while documenting the nginx-safe override in code
+
 ## 2.1.4 — 2026-07-31
 
 - Added an opt-out for frontend LazyCron backup hooks so large dumps do not block visitor requests
